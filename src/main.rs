@@ -5,6 +5,8 @@ use tokio::net::UdpSocket;
 const HEADER_LENGTH: usize = 12;
 const BUFFER_LENGTH: usize = 512;
 
+const MAX_MESSAGE_SIZE: usize = 512;
+
 #[derive(Debug)]
 enum PacketType {
     Question,
@@ -34,7 +36,7 @@ enum AnswerData {
 }
 
 #[derive(Debug)]
-struct HeaderPacket {
+pub struct HeaderPacket {
     id: u16,
     packet_type: PacketType,
     op_code: u8,
@@ -46,82 +48,298 @@ struct HeaderPacket {
 }
 
 #[derive(Debug)]
-struct QuestionPacket {
+pub struct QuestionPacket {
     domain: String,
     question_type: QuestionType,
     class: QuestionClass,
 }
 
 #[derive(Debug)]
-struct AnswerPacket {
+pub struct AnswerPacket {
     domain: String,
     answer_type: QuestionType,
     class: QuestionClass,
     time_to_live: u16,
 }
 
-struct Buffer {
-    current_index: usize,
+type CodingResult<T> = Result<T, &'static str>;
+
+mod frame_encoder {
+    use crate::{
+        AnswerPacket, CodingResult, HeaderPacket, NetworkBuffer, PacketType, QuestionPacket,
+        QuestionType,
+    };
+
+    pub fn encode_domain_label(label: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        // Setting label length
+        buf.put_u8(label.len() as u8)?;
+
+        // Add each character
+        for character in label.chars() {
+            buf.put_u8(character as u8)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn encode_domain(domain: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        let labels = domain.split(".");
+
+        let mut n = 0;
+
+        for label in labels {
+            // Skip empty strings
+            if label.is_empty() {
+                continue;
+            }
+
+            encode_domain_label(&label.to_string(), buf)?;
+        }
+
+        // Terminating domain name
+        buf.put_u8(0x00)
+    }
+
+    pub fn encode_answer(answer: &AnswerPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        // Encode domain name
+        let mut n = encode_domain(&answer.domain, buf);
+
+        // Encode type
+        let type_bytes: u16 = match answer.answer_type {
+            QuestionType::ARecord => 0x0001,
+            QuestionType::NameServersRecord => 0x0002,
+            QuestionType::CNameRecord => 0x0005,
+            QuestionType::MXRecord => 0x000f,
+            _ => 0x0000,
+        };
+
+        // Encode the type
+        buf.put_u16(type_bytes)?;
+
+        // Encode class
+        buf.put_u16(1)?;
+
+        // Encode time to live
+        buf.put_u16(0x00)?;
+        buf.put_u16(answer.time_to_live)?;
+
+        // Encoding RData length field
+        buf.put_u16(0x04)?;
+
+        // Encode RDdata field
+        buf.put_u16(0x0808)?;
+        buf.put_u16(0x0808)
+    }
+
+    pub fn encode_header(header: &HeaderPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        // Encode the packet ID
+        buf.put_u16(header.id)?;
+
+        let mut options: u16 = 0x00;
+
+        options = options
+            | match header.packet_type {
+                PacketType::Question => 0x00,
+                PacketType::Answer => 0x80,
+            };
+
+        buf.put_u16(options)?;
+
+        // Ignore other fields for now
+
+        // Encode Question Count
+        buf.put_u16(header.question_count)?;
+
+        // Encode Answer Count
+        buf.put_u16(header.answer_count)?;
+
+        // Encode Name Server Count
+        buf.put_u16(header.name_server_count)?;
+        // Encode Additional Records Count
+
+        buf.put_u16(header.additional_records_count)
+    }
+
+    pub fn encode_question(question: &QuestionPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        // Encode domain name
+        encode_domain(&question.domain, buf)?;
+
+        // Encode type
+        let type_bytes: u16 = match question.question_type {
+            QuestionType::ARecord => 0x0001,
+            QuestionType::NameServersRecord => 0x0002,
+            QuestionType::CNameRecord => 0x0005,
+            QuestionType::MXRecord => 0x000f,
+            _ => 0x0000,
+        };
+
+        // Encode the type
+        buf.put_u16(type_bytes)?;
+
+        // Encode class
+        buf.put_u16(1)
+    }
+}
+
+mod frame_decoder {
+
+    use super::*;
+
+    pub fn decode_header(buf: &mut NetworkBuffer) -> CodingResult<HeaderPacket> {
+        // decode ID field
+        let id = buf.get_u16()?;
+
+        // decode query response bit
+        let packet_type = match 0x1 & buf.get_u8()? == 1 {
+            true => PacketType::Question,
+            false => PacketType::Answer,
+        };
+
+        let op_code = buf.get_u8()? & 0xE << 1;
+
+        let question_count = buf.get_u16()?;
+        let answer_count = buf.get_u16()?;
+        let name_server_count = buf.get_u16()?;
+        let additional_records_count = buf.get_u16()?;
+
+        return Ok(HeaderPacket {
+            id,
+            packet_type,
+            op_code,
+            question_count,
+            answer_count,
+            name_server_count,
+            additional_records_count,
+        });
+    }
+
+    pub fn decode_question(buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
+        // Decode the domain
+        let domain = decode_domain(buf)?;
+
+        // Decode the type
+        let question_type = match buf.get_u16()? {
+            0x0001 => QuestionType::ARecord,
+            0x0002 => QuestionType::NameServersRecord,
+            0x0005 => QuestionType::CNameRecord,
+            0x000f => QuestionType::MXRecord,
+            _ => QuestionType::Unimplemented,
+        };
+
+        // Decode the class
+        let class = match buf.get_u16()? {
+            0x001 => QuestionClass::InternetAddress,
+            _ => QuestionClass::Unimplemented,
+        };
+
+        return Ok(QuestionPacket {
+            domain,
+            question_type,
+            class,
+        });
+    }
+
+    pub fn decode_domain_label(length: usize, buf: &mut NetworkBuffer) -> CodingResult<String> {
+        let mut label = String::new();
+
+        let mut n = 0;
+
+        while n < length {
+            label.push(buf.get_u8()? as char);
+            n = n + 1;
+        }
+
+        return Ok(label);
+    }
+
+    pub fn decode_domain(buf: &mut NetworkBuffer) -> CodingResult<String> {
+        let mut domain = String::new();
+
+        let mut label_length = buf.get_u8()? as usize;
+
+        while label_length != 0x00 {
+            // Decode current label
+            let label = decode_domain_label(label_length, buf)?;
+
+            // Add separator
+            domain.push('.');
+
+            // Add the label to the total domain
+            domain.push_str(&label);
+
+            label_length = buf.get_u8()? as usize;
+        }
+
+        return Ok(domain);
+    }
+}
+
+pub struct NetworkBuffer {
+    read_cursor: usize,
+    write_cursor: usize,
     buf: [u8; 512],
 }
 
-impl Buffer {
+impl NetworkBuffer {
     pub fn new() -> Self {
         Self {
-            current_index: 0,
-            buf: [0; BUFFER_LENGTH],
+            read_cursor: 0,
+            write_cursor: 0,
+            buf: [0; MAX_MESSAGE_SIZE],
         }
     }
 
-    fn write_byte(&mut self, byte: u8) -> Result<(), &'static str> {
+    fn put_u8(&mut self, byte: u8) -> CodingResult<()> {
         // Checking bounds
-        if self.current_index == BUFFER_LENGTH {
+        if self.write_cursor == BUFFER_LENGTH {
             return Err("BUFFER FULL");
         }
 
         // Write the byte
-        self.buf[self.current_index] = byte;
+        self.buf[self.write_cursor] = byte;
 
         // Increment index
-        self.current_index += 1;
+        self.write_cursor += 1;
 
         return Ok(());
     }
 
-    fn write_u16(&mut self, value: u16) -> Result<(), &'static str> {
-        if self.current_index + 1 == BUFFER_LENGTH {
+    fn put_u16(&mut self, value: u16) -> CodingResult<()> {
+        if self.write_cursor + 2 == BUFFER_LENGTH {
             return Err("BUFFER FULL");
         }
 
-        self.buf[self.current_index] = (value >> 8) as u8;
-        self.buf[self.current_index + 1] = (value & 0x00FF) as u8;
+        self.buf[self.write_cursor] = (value >> 8) as u8;
+        self.buf[self.write_cursor + 1] = (value & 0x00FF) as u8;
 
-        self.current_index += 2;
+        self.write_cursor += 2;
 
         return Ok(());
     }
 
-    fn read_byte(&mut self, byte: u8) -> Result<u8, &'static str> {
+    fn get_u8(&mut self) -> CodingResult<u8> {
         // Checking bounds
-        if self.current_index - 1 < 0 {
+        if self.read_cursor + 1 >= BUFFER_LENGTH {
             return Err("BUFFER EMPTY");
         }
 
-        let byte = self.buf[self.current_index];
+        let byte = self.buf[self.read_cursor];
 
-        self.current_index -= 1;
+        self.read_cursor += 1;
 
         return Ok(byte);
     }
 
-    fn read_u16(&mut self, value: u16) -> Result<u16, &'static str> {
+    fn get_u16(&mut self) -> CodingResult<u16> {
         // Checking bounds
-        if self.current_index - 2 < 0 {
+        if self.read_cursor + 2 >= BUFFER_LENGTH {
             return Err("BUFFER EMPTY");
         }
 
         let value =
-            (self.buf[self.current_index] as u16) << 8 | self.buf[self.current_index + 1] as u16;
+            (self.buf[self.read_cursor] as u16) << 8 | self.buf[self.read_cursor + 1] as u16;
+
+        self.read_cursor += 2;
 
         return Ok(value);
     }
@@ -276,14 +494,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sock = UdpSocket::bind("127.0.0.1:8080").await?;
 
     loop {
-        let mut buf = [0; 1024];
+        let mut buf = NetworkBuffer::new();
 
-        let (len, addr) = sock.recv_from(&mut buf).await?;
+        let (len, addr) = sock.recv_from(&mut buf.buf).await?;
+
+        buf.write_cursor = len;
+
         println!("{:?} bytes received from {:?}", len, addr);
 
-        println!("{:?} {:?}", buf[0], buf[1]);
-
-        let header = decode_header(&buf);
+        let header = frame_decoder::decode_header(&mut buf)?;
+        let question = frame_decoder::decode_question(&mut buf)?;
 
         let answer_header = HeaderPacket {
             id: header.id,
@@ -295,17 +515,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             additional_records_count: 0,
         };
 
-        let mut answer_buf = [0; 1024];
+        let mut answer_buf = NetworkBuffer::new();
 
-        answer_header.encode(&mut answer_buf);
+        frame_encoder::encode_header(&answer_header, &mut answer_buf)?;
 
         println!("{:?}", header);
 
-        let question = decode_question(&buf[HEADER_LENGTH..]);
-
         println!("{:?}", question);
 
-        let m = question.encode(&mut answer_buf[HEADER_LENGTH..]);
+        frame_encoder::encode_question(&question, &mut answer_buf)?;
 
         let answer = AnswerPacket {
             domain: question.domain,
@@ -316,13 +534,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("{:?}", answer);
 
-        let n = answer.encode(&mut answer_buf[HEADER_LENGTH + m..]);
+        frame_encoder::encode_answer(&answer, &mut answer_buf)?;
 
-        println!("{:?}", answer_buf);
+        println!("{:?}", buf.buf);
+        println!("{:?}", answer_buf.buf);
 
-        let len = sock
-            .send_to(&answer_buf[..HEADER_LENGTH + n + m], addr)
-            .await?;
+        let len = sock.send_to(&answer_buf.buf, addr).await?;
+
         println!("{:?} bytes sent from {:?}", len, addr);
     }
 }
@@ -453,7 +671,32 @@ mod tests {
     }
 }
 
+struct Frame {}
+
 struct Connection {
     sock: UdpSocket,
     addr: SocketAddr,
+    read_buf: NetworkBuffer,
+    write_buf: NetworkBuffer,
+}
+
+impl Connection {
+    pub fn new(sock: UdpSocket, addr: SocketAddr) -> Connection {
+        // Initializing buffers
+        let read_buf = NetworkBuffer::new();
+        let write_buf = NetworkBuffer::new();
+
+        return Connection {
+            sock,
+            addr,
+            read_buf,
+            write_buf,
+        };
+    }
+
+    pub async fn write_frame(&mut self, frame: Frame) {}
+
+    pub async fn read_frame(&mut self, frame: Frame) -> Option<Frame> {
+        return Some(Frame {});
+    }
 }
