@@ -37,6 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             question_type: packets::QuestionType::ARecord,
         };
 
+        frame.header.question_count = 1;
         frame.header.answer_count = 1;
 
         frame.add_question(question);

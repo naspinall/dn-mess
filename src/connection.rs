@@ -8,7 +8,7 @@ use crate::{
         frame_encoder::{encode_answer, encode_header, encode_question},
     },
     errors::ConnectionError,
-    network_buffer::{NetworkBuffer, MAX_MESSAGE_SIZE},
+    network_buffer::NetworkBuffer,
     packets::{AnswerPacket, HeaderPacket, QuestionPacket},
 };
 
@@ -66,7 +66,11 @@ impl Connection<'_> {
             encode_answer(answer, &mut self.buf)?;
         }
 
-        self.sock.send_to(&mut self.buf.buf, addr).await?;
+        let buffer_length = self.buf.len();
+
+        self.sock
+            .send_to(&mut self.buf.buf[..buffer_length], addr)
+            .await?;
 
         self.buf.reset();
 

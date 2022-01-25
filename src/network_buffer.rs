@@ -18,10 +18,6 @@ impl NetworkBuffer {
         }
     }
 
-    pub fn set_write_cursor(&mut self, cursor: usize) {
-        self.write_cursor = cursor;
-    }
-
     pub fn put_u8(&mut self, byte: u8) -> BufferResult<()> {
         // Checking bounds
         if self.write_cursor == MAX_MESSAGE_SIZE {
@@ -111,5 +107,9 @@ impl NetworkBuffer {
     pub fn reset(&mut self) {
         self.read_cursor = 0;
         self.write_cursor = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.write_cursor
     }
 }
