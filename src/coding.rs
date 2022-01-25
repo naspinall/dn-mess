@@ -1,16 +1,41 @@
+use std::collections::HashMap;
+
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
+    AnswerData, AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
 
-pub mod frame_encoder {
+pub struct FrameCoder {
+    domains: HashMap<String, usize>,
+}
 
-    use super::*;
+impl FrameCoder {
+    pub fn new() -> FrameCoder {
+        FrameCoder {
+            domains: HashMap::new(),
+        }
+    }
 
-    pub fn encode_domain_label(label: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn set_compressed_domain(&mut self, domain: &String, buf: &NetworkBuffer) {
+        // Current index of compression
+        let compressed_index = buf.len();
+
+        // Set into hash map
+        self.domains.insert(domain.clone(), compressed_index);
+    }
+
+    pub fn get_compressed_domain(&self, domain: &String) -> Option<&usize> {
+        self.domains.get(domain)
+    }
+
+    pub fn encode_domain_label(
+        &mut self,
+        label: &String,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
         // Setting label length
         buf.put_u8(label.len() as u8)?;
 
@@ -22,7 +47,28 @@ pub mod frame_encoder {
         Ok(())
     }
 
-    pub fn encode_domain(domain: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn write_compressed_domain(
+        &self,
+        offset: usize,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
+        let compressed_offset = 0xC000 | offset as u16;
+
+        return buf.put_u16(compressed_offset);
+    }
+
+    pub fn encode_domain(&mut self, domain: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        // Check if domain has already been cached
+        match self.get_compressed_domain(&domain) {
+            // Write the compressed full domain and return
+            Some(index) => return self.write_compressed_domain(*index, buf),
+            // Do nothing if domain has not been compressed
+            None => {}
+        };
+
+        // Set domain into hashmap
+        self.set_compressed_domain(domain, &buf);
+
         let labels = domain.split(".");
 
         for label in labels {
@@ -31,16 +77,20 @@ pub mod frame_encoder {
                 continue;
             }
 
-            encode_domain_label(&label.to_string(), buf)?;
+            self.encode_domain_label(&label.to_string(), buf)?;
         }
 
         // Terminating domain name
         buf.put_u8(0x00)
     }
 
-    pub fn encode_answer(answer: &AnswerPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_answer(
+        &mut self,
+        answer: &AnswerPacket,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
         // Encode domain name
-        encode_domain(&answer.domain, buf)?;
+        self.encode_domain(&answer.domain, buf)?;
 
         // Encode type
         let type_bytes: u16 = match answer.answer_type {
@@ -68,7 +118,11 @@ pub mod frame_encoder {
         buf.put_u16(0x0808)
     }
 
-    pub fn encode_header(header: &HeaderPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_header(
+        &mut self,
+        header: &HeaderPacket,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
         // Encode the packet ID
         buf.put_u16(header.id)?;
 
@@ -97,9 +151,13 @@ pub mod frame_encoder {
         buf.put_u16(header.additional_records_count)
     }
 
-    pub fn encode_question(question: &QuestionPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_question(
+        &mut self,
+        question: &QuestionPacket,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
         // Encode domain name
-        encode_domain(&question.domain, buf)?;
+        self.encode_domain(&question.domain, buf)?;
 
         // Encode type
         let type_bytes: u16 = match question.question_type {
@@ -116,15 +174,8 @@ pub mod frame_encoder {
         // Encode class
         buf.put_u16(1)
     }
-}
 
-pub mod frame_decoder {
-
-    use crate::packets::AnswerData;
-
-    use super::*;
-
-    pub fn decode_header(buf: &mut NetworkBuffer) -> CodingResult<HeaderPacket> {
+    pub fn decode_header(&mut self, buf: &mut NetworkBuffer) -> CodingResult<HeaderPacket> {
         // decode ID field
         let id = buf.get_u16()?;
 
@@ -152,9 +203,9 @@ pub mod frame_decoder {
         });
     }
 
-    pub fn decode_question(buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
+    pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
         // Decode the domain
-        let domain = decode_domain(buf)?;
+        let domain = self.decode_domain(buf)?;
 
         // Decode the type
         let question_type = match buf.get_u16()? {
@@ -178,9 +229,9 @@ pub mod frame_decoder {
         });
     }
 
-    pub fn decode_answer(buf: &mut NetworkBuffer) -> CodingResult<AnswerPacket> {
+    pub fn decode_answer(&mut self, buf: &mut NetworkBuffer) -> CodingResult<AnswerPacket> {
         // Decode the domain
-        let domain = decode_domain(buf)?;
+        let domain = self.decode_domain(buf)?;
 
         // Decode the type
         let answer_type = match buf.get_u16()? {
@@ -211,7 +262,11 @@ pub mod frame_decoder {
         });
     }
 
-    pub fn decode_domain_label(length: usize, buf: &mut NetworkBuffer) -> CodingResult<String> {
+    pub fn decode_domain_label(
+        &mut self,
+        length: usize,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<String> {
         let mut label = String::new();
 
         let mut n = 0;
@@ -224,14 +279,14 @@ pub mod frame_decoder {
         return Ok(label);
     }
 
-    pub fn decode_domain(buf: &mut NetworkBuffer) -> CodingResult<String> {
+    pub fn decode_domain(&mut self, buf: &mut NetworkBuffer) -> CodingResult<String> {
         let mut domain = String::new();
 
         let mut label_length = buf.get_u8()? as usize;
 
         while label_length != 0x00 {
             // Decode current label
-            let label = decode_domain_label(label_length, buf)?;
+            let label = self.decode_domain_label(label_length, buf)?;
 
             // Add separator
             domain.push('.');

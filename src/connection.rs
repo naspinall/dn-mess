@@ -3,10 +3,7 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 use crate::{
-    coding::{
-        frame_decoder::{decode_answer, decode_header, decode_question},
-        frame_encoder::{encode_answer, encode_header, encode_question},
-    },
+    coding::FrameCoder,
     errors::ConnectionError,
     network_buffer::NetworkBuffer,
     packets::{AnswerPacket, HeaderPacket, QuestionPacket},
@@ -34,6 +31,7 @@ pub struct Connection<'a> {
     sock: &'a UdpSocket,
     addr: Option<SocketAddr>,
     buf: NetworkBuffer,
+    encoder: FrameCoder,
 }
 
 impl Connection<'_> {
@@ -41,10 +39,13 @@ impl Connection<'_> {
         // Initializing buffers
         let buf = NetworkBuffer::new();
 
+        let encoder = FrameCoder::new();
+
         return Connection {
             sock,
             addr: None,
             buf,
+            encoder,
         };
     }
 
@@ -54,16 +55,16 @@ impl Connection<'_> {
             None => return Err(Box::new(ConnectionError::NoClientAddress)),
         };
 
-        encode_header(&frame.header, &mut self.buf)?;
+        self.encoder.encode_header(&frame.header, &mut self.buf)?;
 
         // Encode question
         for question in frame.questions.iter() {
-            encode_question(question, &mut self.buf)?;
+            self.encoder.encode_question(question, &mut self.buf)?;
         }
 
         // Encode question
         for answer in frame.answers.iter() {
-            encode_answer(answer, &mut self.buf)?;
+            self.encoder.encode_answer(answer, &mut self.buf)?;
         }
 
         let buffer_length = self.buf.len();
@@ -80,7 +81,7 @@ impl Connection<'_> {
     pub async fn read_frame(&mut self) -> ConnectionResult<Frame> {
         let (len, addr) = self.sock.recv_from(&mut self.buf.buf).await?;
 
-        let header = decode_header(&mut self.buf)?;
+        let header = self.encoder.decode_header(&mut self.buf)?;
 
         let mut frame = Frame {
             header,
@@ -90,13 +91,13 @@ impl Connection<'_> {
 
         // Decode question
         for _ in 0..frame.header.question_count {
-            let question = decode_question(&mut self.buf)?;
+            let question = self.encoder.decode_question(&mut self.buf)?;
             frame.questions.push(question);
         }
 
         // Decode the answer
         for _ in 0..frame.header.answer_count {
-            let answer = decode_answer(&mut self.buf)?;
+            let answer = self.encoder.decode_answer(&mut self.buf)?;
             frame.answers.push(answer);
         }
 
