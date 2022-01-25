@@ -3,6 +3,8 @@ use tokio::net::UdpSocket;
 use crate::packets::{AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionType};
 
 mod coding;
+mod connection;
+mod errors;
 mod network_buffer;
 mod packets;
 
@@ -59,41 +61,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let len = sock.send_to(&answer_buf.buf, addr).await?;
 
         println!("{:?} bytes sent from {:?}", len, addr);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    #[test]
-    fn test_decode_domain_label() {
-        let hello: [u8; 5] = [0x68, 0x65, 0x6c, 0x6c, 0x6f];
-
-        let label = decode_domain_label(5, &hello);
-
-        assert_eq!(label, "hello");
-    }
-
-    #[test]
-    fn test_decode_single_domain() {
-        let hello: [u8; 6] = [0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f];
-
-        let (n, label) = decode_domain(&hello);
-
-        assert_eq!(label, ".hello");
-        assert_eq!(n, 6);
-    }
-
-    #[test]
-    fn test_decode_complicated_domain() {
-        let hello: [u8; 13] = [
-            0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x03, 0x63, 0x6f, 0x6d, 0x02, 0x61, 0x75,
-        ];
-
-        let (n, label) = decode_domain(&hello);
-
-        assert_eq!(label, ".hello.com.au");
-        assert_eq!(n, 13);
     }
 }

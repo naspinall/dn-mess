@@ -22,7 +22,7 @@ pub enum QuestionClass {
 
 #[derive(Debug)]
 pub enum AnswerData {
-    ARecord(u16),
+    ARecord(u32),
     CName(String),
 }
 
@@ -50,5 +50,6 @@ pub struct AnswerPacket {
     pub domain: String,
     pub answer_type: QuestionType,
     pub class: QuestionClass,
-    pub time_to_live: u16,
+    pub time_to_live: u32,
+    pub answer_data: AnswerData,
 }

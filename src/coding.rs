@@ -1,9 +1,10 @@
+use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
     AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
 };
 
-type CodingResult<T> = Result<T, &'static str>;
+type CodingResult<T> = Result<T, NetworkBufferError>;
 
 pub mod frame_encoder {
 
@@ -24,8 +25,6 @@ pub mod frame_encoder {
     pub fn encode_domain(domain: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
         let labels = domain.split(".");
 
-        let mut n = 0;
-
         for label in labels {
             // Skip empty strings
             if label.is_empty() {
@@ -41,7 +40,7 @@ pub mod frame_encoder {
 
     pub fn encode_answer(answer: &AnswerPacket, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Encode domain name
-        let mut n = encode_domain(&answer.domain, buf);
+        encode_domain(&answer.domain, buf)?;
 
         // Encode type
         let type_bytes: u16 = match answer.answer_type {
@@ -59,8 +58,7 @@ pub mod frame_encoder {
         buf.put_u16(1)?;
 
         // Encode time to live
-        buf.put_u16(0x00)?;
-        buf.put_u16(answer.time_to_live)?;
+        buf.put_u32(answer.time_to_live)?;
 
         // Encoding RData length field
         buf.put_u16(0x04)?;
@@ -122,6 +120,8 @@ pub mod frame_encoder {
 
 pub mod frame_decoder {
 
+    use crate::packets::AnswerData;
+
     use super::*;
 
     pub fn decode_header(buf: &mut NetworkBuffer) -> CodingResult<HeaderPacket> {
@@ -175,6 +175,39 @@ pub mod frame_decoder {
             domain,
             question_type,
             class,
+        });
+    }
+
+    pub fn decode_answer(buf: &mut NetworkBuffer) -> CodingResult<AnswerPacket> {
+        // Decode the domain
+        let domain = decode_domain(buf)?;
+
+        // Decode the type
+        let answer_type = match buf.get_u16()? {
+            0x0001 => QuestionType::ARecord,
+            0x0002 => QuestionType::NameServersRecord,
+            0x0005 => QuestionType::CNameRecord,
+            0x000f => QuestionType::MXRecord,
+            _ => QuestionType::Unimplemented,
+        };
+
+        // Decode the class
+        let class = match buf.get_u16()? {
+            0x001 => QuestionClass::InternetAddress,
+            _ => QuestionClass::Unimplemented,
+        };
+
+        let time_to_live = buf.get_u32()?;
+
+        // Assume A record for now
+        let answer_data = buf.get_u32()?;
+
+        return Ok(AnswerPacket {
+            domain,
+            answer_type,
+            class,
+            time_to_live,
+            answer_data: AnswerData::ARecord(answer_data),
         });
     }
 
