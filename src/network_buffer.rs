@@ -1,6 +1,6 @@
 use crate::errors::NetworkBufferError;
 
-const MAX_MESSAGE_SIZE: usize = 512;
+pub const MAX_MESSAGE_SIZE: usize = 512;
 
 type BufferResult<T> = Result<T, NetworkBufferError>;
 pub struct NetworkBuffer {
@@ -99,8 +99,8 @@ impl NetworkBuffer {
         }
 
         let value = (self.buf[self.read_cursor] as u32) << 24
-            | (self.buf[self.read_cursor + 1] << 16) as u32
-            | (self.buf[self.read_cursor + 2] << 8) as u32
+            | (self.buf[self.read_cursor + 1] as u32) << 16 as u32
+            | (self.buf[self.read_cursor + 2] as u32) << 8
             | self.buf[self.read_cursor + 3] as u32;
 
         self.read_cursor += 4;

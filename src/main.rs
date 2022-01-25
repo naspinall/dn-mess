@@ -1,6 +1,7 @@
+use connection::Connection;
 use tokio::net::UdpSocket;
 
-use crate::packets::{AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionType};
+use crate::packets::{AnswerPacket, QuestionClass, QuestionPacket};
 
 mod coding;
 mod connection;
@@ -13,53 +14,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sock = UdpSocket::bind("127.0.0.1:8080").await?;
 
     loop {
-        let mut buf = network_buffer::NetworkBuffer::new();
+        let mut connection = Connection::new(&sock);
 
-        let (len, addr) = sock.recv_from(&mut buf.buf).await?;
+        let mut frame = connection.read_frame().await?;
 
-        buf.set_write_cursor(len);
-
-        println!("{:?} bytes received from {:?}", len, addr);
-
-        let header = coding::frame_decoder::decode_header(&mut buf)?;
-        let question = coding::frame_decoder::decode_question(&mut buf)?;
-
-        let answer_header = HeaderPacket {
-            id: header.id,
-            packet_type: PacketType::Answer,
-            op_code: 0,
-            name_server_count: 0,
-            question_count: 1,
-            answer_count: 1,
-            additional_records_count: 0,
+        let client_question = match frame.questions.pop() {
+            Some(question) => question,
+            None => continue,
         };
-
-        let mut answer_buf = network_buffer::NetworkBuffer::new();
-
-        coding::frame_encoder::encode_header(&answer_header, &mut answer_buf)?;
-
-        println!("{:?}", header);
-
-        println!("{:?}", question);
-
-        coding::frame_encoder::encode_question(&question, &mut answer_buf)?;
 
         let answer = AnswerPacket {
-            domain: question.domain,
-            answer_type: QuestionType::ARecord,
-            class: QuestionClass::InternetAddress,
-            time_to_live: 100,
+            domain: client_question.domain.clone(),
+            answer_type: client_question.question_type,
+            class: client_question.class,
+            time_to_live: 300,
+            answer_data: packets::AnswerData::ARecord(0x08080808),
         };
 
-        println!("{:?}", answer);
+        let question = QuestionPacket {
+            domain: client_question.domain.clone(),
+            class: QuestionClass::InternetAddress,
+            question_type: packets::QuestionType::ARecord,
+        };
 
-        coding::frame_encoder::encode_answer(&answer, &mut answer_buf)?;
+        frame.header.answer_count = 1;
 
-        println!("{:?}", buf.buf);
-        println!("{:?}", answer_buf.buf);
+        frame.add_question(question);
+        frame.add_answer(answer);
 
-        let len = sock.send_to(&answer_buf.buf, addr).await?;
-
-        println!("{:?} bytes sent from {:?}", len, addr);
+        connection.write_frame(frame).await?;
     }
 }
