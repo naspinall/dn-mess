@@ -10,13 +10,15 @@ use crate::packets::{
 type CodingResult<T> = Result<T, NetworkBufferError>;
 
 pub struct FrameCoder {
-    domains: HashMap<String, usize>,
+    encoded_domains: HashMap<String, usize>,
+    decoded_domains: HashMap<usize, String>,
 }
 
 impl FrameCoder {
     pub fn new() -> FrameCoder {
         FrameCoder {
-            domains: HashMap::new(),
+            decoded_domains: HashMap::new(),
+            encoded_domains: HashMap::new(),
         }
     }
 
@@ -25,11 +27,12 @@ impl FrameCoder {
         let compressed_index = buf.len();
 
         // Set into hash map
-        self.domains.insert(domain.clone(), compressed_index);
+        self.encoded_domains
+            .insert(domain.clone(), compressed_index);
     }
 
     pub fn get_compressed_domain(&self, domain: &String) -> Option<&usize> {
-        self.domains.get(domain)
+        self.encoded_domains.get(domain)
     }
 
     pub fn encode_domain_label(
