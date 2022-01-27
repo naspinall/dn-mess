@@ -10,8 +10,8 @@ pub struct NetworkBuffer {
 }
 
 impl NetworkBuffer {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> NetworkBuffer {
+        NetworkBuffer {
             read_cursor: 0,
             write_cursor: 0,
             buf: [0; MAX_MESSAGE_SIZE],
@@ -58,7 +58,15 @@ impl NetworkBuffer {
 
         self.write_cursor += 4;
 
-        return Ok(());
+        Ok(())
+    }
+
+    pub fn put_bytes(&mut self, bytes: &[u8]) -> BufferResult<()> {
+        for byte in bytes {
+            self.put_u8(*byte)?
+        }
+
+        Ok(())
     }
 
     pub fn get_u8(&mut self) -> BufferResult<u8> {
@@ -76,6 +84,7 @@ impl NetworkBuffer {
 
     pub fn get_u16(&mut self) -> BufferResult<u16> {
         // Checking bounds
+
         if self.read_cursor + 2 >= MAX_MESSAGE_SIZE {
             return Err(NetworkBufferError::BufferEmptyError);
         }

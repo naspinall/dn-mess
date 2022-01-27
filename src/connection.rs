@@ -6,7 +6,7 @@ use crate::{
     coding::FrameCoder,
     errors::ConnectionError,
     network_buffer::NetworkBuffer,
-    packets::{AnswerPacket, HeaderPacket, QuestionPacket},
+    packets::{HeaderPacket, QuestionPacket, ResourceRecordPacket},
 };
 
 type ConnectionResult<T> = Result<T, Box<dyn std::error::Error>>;
@@ -15,11 +15,11 @@ type ConnectionResult<T> = Result<T, Box<dyn std::error::Error>>;
 pub struct Frame {
     pub header: HeaderPacket,
     pub questions: Vec<QuestionPacket>,
-    pub answers: Vec<AnswerPacket>,
+    pub answers: Vec<ResourceRecordPacket>,
 }
 
 impl Frame {
-    pub fn add_answer(&mut self, answer: AnswerPacket) {
+    pub fn add_answer(&mut self, answer: ResourceRecordPacket) {
         self.answers.push(answer);
     }
     pub fn add_question(&mut self, question: QuestionPacket) {
@@ -97,7 +97,7 @@ impl Connection<'_> {
 
         // Decode the answer
         for _ in 0..frame.header.answer_count {
-            let answer = self.encoder.decode_answer(&mut self.buf)?;
+            let answer = self.encoder.decode_resource_record(&mut self.buf)?;
             frame.answers.push(answer);
         }
 

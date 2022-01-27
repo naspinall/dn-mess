@@ -1,7 +1,7 @@
 use connection::Connection;
 use tokio::net::UdpSocket;
 
-use crate::packets::{AnswerPacket, QuestionClass, QuestionPacket};
+use crate::packets::{QuestionClass, QuestionPacket, ResourceRecordPacket};
 
 mod coding;
 mod connection;
@@ -23,12 +23,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None => continue,
         };
 
-        let answer = AnswerPacket {
+        let answer = ResourceRecordPacket {
             domain: client_question.domain.clone(),
-            answer_type: client_question.question_type,
-            class: client_question.class,
+            record_type: packets::ResourceRecordType::ARecord,
+            class: packets::ResourceRecordClass::InternetAddress,
             time_to_live: 300,
-            answer_data: packets::AnswerData::ARecord(0x08080808),
+            record_data: packets::ResourceRecordData::ARecord(0x08080808),
         };
 
         let question = QuestionPacket {

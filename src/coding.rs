@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    AnswerData, AnswerPacket, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
+    HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType, ResourceRecordClass,
+    ResourceRecordData, ResourceRecordPacket, ResourceRecordType,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
@@ -86,18 +87,18 @@ impl FrameCoder {
 
     pub fn encode_answer(
         &mut self,
-        answer: &AnswerPacket,
+        answer: &ResourceRecordPacket,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
         self.encode_domain(&answer.domain, buf)?;
 
         // Encode type
-        let type_bytes: u16 = match answer.answer_type {
-            QuestionType::ARecord => 0x0001,
-            QuestionType::NameServersRecord => 0x0002,
-            QuestionType::CNameRecord => 0x0005,
-            QuestionType::MXRecord => 0x000f,
+        let type_bytes: u16 = match answer.record_type {
+            ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::NSRecord => 0x0002,
+            ResourceRecordType::CNameRecord => 0x0005,
+            ResourceRecordType::MXRecord => 0x000f,
             _ => 0x0000,
         };
 
@@ -229,39 +230,6 @@ impl FrameCoder {
         });
     }
 
-    pub fn decode_answer(&mut self, buf: &mut NetworkBuffer) -> CodingResult<AnswerPacket> {
-        // Decode the domain
-        let domain = self.decode_domain(buf)?;
-
-        // Decode the type
-        let answer_type = match buf.get_u16()? {
-            0x0001 => QuestionType::ARecord,
-            0x0002 => QuestionType::NameServersRecord,
-            0x0005 => QuestionType::CNameRecord,
-            0x000f => QuestionType::MXRecord,
-            _ => QuestionType::Unimplemented,
-        };
-
-        // Decode the class
-        let class = match buf.get_u16()? {
-            0x001 => QuestionClass::InternetAddress,
-            _ => QuestionClass::Unimplemented,
-        };
-
-        let time_to_live = buf.get_u32()?;
-
-        // Assume A record for now
-        let answer_data = buf.get_u32()?;
-
-        return Ok(AnswerPacket {
-            domain,
-            answer_type,
-            class,
-            time_to_live,
-            answer_data: AnswerData::ARecord(answer_data),
-        });
-    }
-
     pub fn decode_domain_label(
         &mut self,
         length: usize,
@@ -298,5 +266,187 @@ impl FrameCoder {
         }
 
         return Ok(domain);
+    }
+
+    pub fn decode_type(&mut self, buf: &mut NetworkBuffer) -> CodingResult<ResourceRecordType> {
+        let record_type = match buf.get_u16()? {
+            0x01 => ResourceRecordType::ARecord,
+            0x1C => ResourceRecordType::AAAARecord,
+            0x05 => ResourceRecordType::CNameRecord,
+            0x0F => ResourceRecordType::MXRecord,
+            0x02 => ResourceRecordType::NSRecord,
+            0x0C => ResourceRecordType::PTRRecord,
+            0x06 => ResourceRecordType::SOARecord,
+            0x21 => ResourceRecordType::SRVRecord,
+            0x10 => ResourceRecordType::TXTRecord,
+            _ => ResourceRecordType::Unimplemented,
+        };
+
+        Ok(record_type)
+    }
+
+    pub fn decode_class(&mut self, buf: &mut NetworkBuffer) -> CodingResult<ResourceRecordClass> {
+        let class = match buf.get_u16()? {
+            0x001 => ResourceRecordClass::InternetAddress,
+            _ => ResourceRecordClass::Unimplemented,
+        };
+
+        return Ok(class);
+    }
+
+    pub fn decode_resource_record(
+        &mut self,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<ResourceRecordPacket> {
+        // Decoding domain name record refers too
+        let domain = self.decode_domain(buf)?;
+        let record_type = self.decode_type(buf)?;
+        let class = self.decode_class(buf)?;
+        let time_to_live = buf.get_u32()?;
+        let data_length = buf.get_u16()?;
+        let payload = buf.get_u32()?;
+
+        return Ok(ResourceRecordPacket {
+            domain,
+            record_type,
+            record_data: ResourceRecordData::ARecord(payload),
+            class,
+            time_to_live,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_single_domain() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let domain_bytes: [u8; 7] = [
+            0x05, 'h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8, 0x00,
+        ];
+
+        buf.put_bytes(&domain_bytes).unwrap();
+
+        let domain = coder.decode_domain(&mut buf).unwrap();
+
+        // A . is appended so include here
+        assert_eq!(domain, String::from(".hello"));
+    }
+
+    #[test]
+    fn test_decode_domain() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let domain_bytes: [u8; 11] = [
+            0x05, 'h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8, 0x03, 'c' as u8,
+            'o' as u8, 'm' as u8, 0x00,
+        ];
+
+        buf.put_bytes(&domain_bytes).unwrap();
+
+        let domain = coder.decode_domain(&mut buf).unwrap();
+
+        // A . is appended so include here
+        assert_eq!(domain, String::from(".hello.com"));
+    }
+
+    #[test]
+    fn test_decode_label() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let domain_bytes: [u8; 5] = ['h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8];
+
+        buf.put_bytes(&domain_bytes).unwrap();
+
+        let domain = coder.decode_domain_label(5, &mut buf).unwrap();
+
+        // A . is appended so include here
+        assert_eq!(domain, String::from("hello"));
+    }
+
+    #[test]
+    fn test_decode_header() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let header_bytes: [u8; 12] = [112, 181, 1, 32, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+
+        buf.put_bytes(&header_bytes).unwrap();
+
+        let header = coder.decode_header(&mut buf).unwrap();
+
+        assert_eq!(header.id, 28853);
+        assert_eq!(header.op_code, 0x00);
+        assert!(match header.packet_type {
+            PacketType::Question => true,
+            _ => false,
+        });
+        assert_eq!(header.question_count, 1);
+        assert_eq!(header.answer_count, 2);
+        assert_eq!(header.name_server_count, 3);
+        assert_eq!(header.additional_records_count, 65297);
+    }
+
+    #[test]
+    fn test_decode_question() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let question_bytes: [u8; 20] = [
+            3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 1, 0, 1,
+        ];
+
+        buf.put_bytes(&question_bytes).unwrap();
+
+        let question = coder.decode_question(&mut buf).unwrap();
+
+        assert_eq!(question.domain, String::from(".www.google.com"));
+        assert!(match question.question_type {
+            QuestionType::ARecord => true,
+            _ => false,
+        });
+
+        assert!(match question.class {
+            QuestionClass::InternetAddress => true,
+            _ => false,
+        })
+    }
+
+    #[test]
+    fn test_decode_resource_record() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let resource_record_bytes: [u8; 30] = [
+            3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 1, 0, 1, 0,
+            0, 0, 255, 0, 4, 8, 8, 8, 8,
+        ];
+
+        buf.put_bytes(&resource_record_bytes).unwrap();
+
+        let resource_record = coder.decode_resource_record(&mut buf).unwrap();
+
+        assert_eq!(resource_record.domain, String::from(".www.google.com"));
+        assert!(match resource_record.record_type {
+            ResourceRecordType::ARecord => true,
+            _ => false,
+        });
+
+        assert!(match resource_record.class {
+            ResourceRecordClass::InternetAddress => true,
+            _ => false,
+        });
+
+        assert_eq!(resource_record.time_to_live, 255);
+        match resource_record.record_data {
+            ResourceRecordData::ARecord(value) => assert_eq!(value, 0x08080808),
+            _ => panic!("Bad resource record"),
+        }
     }
 }

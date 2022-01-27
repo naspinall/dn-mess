@@ -21,8 +21,29 @@ pub enum QuestionClass {
 }
 
 #[derive(Debug)]
-pub enum AnswerData {
+pub enum ResourceRecordType {
+    ARecord,
+    AAAARecord,
+    CNameRecord,
+    MXRecord,
+    NSRecord,
+    PTRRecord,
+    SOARecord,
+    SRVRecord,
+    TXTRecord,
+    Unimplemented,
+}
+
+#[derive(Debug)]
+pub enum ResourceRecordClass {
+    InternetAddress,
+    Unimplemented,
+}
+
+#[derive(Debug)]
+pub enum ResourceRecordData {
     ARecord(u32),
+    AAAARecord(u128),
     CName(String),
 }
 
@@ -46,10 +67,10 @@ pub struct QuestionPacket {
 }
 
 #[derive(Debug)]
-pub struct AnswerPacket {
+pub struct ResourceRecordPacket {
     pub domain: String,
-    pub answer_type: QuestionType,
-    pub class: QuestionClass,
+    pub record_type: ResourceRecordType,
+    pub class: ResourceRecordClass,
     pub time_to_live: u32,
-    pub answer_data: AnswerData,
+    pub record_data: ResourceRecordData,
 }
