@@ -184,12 +184,23 @@ impl FrameCoder {
         let id = buf.get_u16()?;
 
         // decode query response bit
-        let packet_type = match 0x1 & buf.get_u8()? == 1 {
+
+        let flag_byte = buf.get_u8()?;
+
+        let packet_type = match 0x01 & flag_byte == 1 {
             true => PacketType::Question,
             false => PacketType::Answer,
         };
 
-        let op_code = buf.get_u8()? & 0xE << 1;
+        let op_code = (flag_byte >> 1) as u8 & 0x0F;
+        let authoritative_answer = flag_byte >> 5 & 0x01 == 1;
+        let truncation = flag_byte >> 6 & 0x01 == 1;
+        let recursion_desired = flag_byte >> 7 & 0x01 == 1;
+
+        let flag_byte = buf.get_u8()?;
+
+        let recursion_available = flag_byte & 0x01 == 1;
+        let response_code = flag_byte >> 4 & 0x0F;
 
         let question_count = buf.get_u16()?;
         let answer_count = buf.get_u16()?;
@@ -200,6 +211,13 @@ impl FrameCoder {
             id,
             packet_type,
             op_code,
+
+            authoritative_answer,
+            truncation,
+            recursion_desired,
+            recursion_available,
+            response_code,
+
             question_count,
             answer_count,
             name_server_count,
@@ -394,18 +412,25 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let header_bytes: [u8; 12] = [112, 181, 1, 32, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+        let header_bytes: [u8; 12] = [112, 181, 0xE5, 0x41, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
 
         buf.put_bytes(&header_bytes).unwrap();
 
         let header = coder.decode_header(&mut buf).unwrap();
 
         assert_eq!(header.id, 28853);
-        assert_eq!(header.op_code, 0x00);
+        assert_eq!(header.op_code, 0x02);
         assert!(match header.packet_type {
             PacketType::Question => true,
             _ => false,
         });
+
+        assert_eq!(header.authoritative_answer, true);
+        assert_eq!(header.truncation, true);
+        assert_eq!(header.recursion_desired, true);
+        assert_eq!(header.recursion_available, true);
+        assert_eq!(header.response_code, 4);
+
         assert_eq!(header.question_count, 1);
         assert_eq!(header.answer_count, 2);
         assert_eq!(header.name_server_count, 3);

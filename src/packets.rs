@@ -52,6 +52,11 @@ pub struct HeaderPacket {
     pub id: u16,
     pub packet_type: PacketType,
     pub op_code: u8,
+    pub authoritative_answer: bool,
+    pub truncation: bool,
+    pub recursion_desired: bool,
+    pub recursion_available: bool,
+    pub response_code: u8,
 
     pub question_count: u16,
     pub answer_count: u16,
