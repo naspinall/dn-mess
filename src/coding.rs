@@ -253,9 +253,22 @@ impl FrameCoder {
     pub fn decode_domain(&mut self, buf: &mut NetworkBuffer) -> CodingResult<String> {
         let mut domain = String::new();
 
+        let starting_index = buf.read_cursor;
+
         let mut label_length = buf.get_u8()? as usize;
 
         while label_length != 0x00 {
+            if label_length & 0xC0 > 0 {
+                // TODO two byte offset
+                let pointer_location = buf.get_u8()?;
+
+                return Ok(self
+                    .decoded_domains
+                    .get(&(pointer_location as usize))
+                    .unwrap()
+                    .to_string());
+            }
+
             // Decode current label
             let label = self.decode_domain_label(label_length, buf)?;
 
@@ -267,6 +280,9 @@ impl FrameCoder {
 
             label_length = buf.get_u8()? as usize;
         }
+
+        // Add to cache
+        self.decoded_domains.insert(starting_index, domain.clone());
 
         return Ok(domain);
     }
@@ -451,5 +467,25 @@ mod tests {
             ResourceRecordData::ARecord(value) => assert_eq!(value, 0x08080808),
             _ => panic!("Bad resource record"),
         }
+    }
+
+    #[test]
+    fn test_decode_pointer_domain() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let pointer_domain_bytes: [u8; 18] = [
+            3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 192, 0,
+        ];
+
+        buf.put_bytes(&pointer_domain_bytes).unwrap();
+
+        let original = coder.decode_domain(&mut buf).unwrap();
+
+        assert_eq!(original, String::from(".www.google.com"));
+
+        let pointer = coder.decode_domain(&mut buf).unwrap();
+
+        assert_eq!(original, pointer);
     }
 }

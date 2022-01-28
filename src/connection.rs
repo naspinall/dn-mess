@@ -49,10 +49,17 @@ impl Connection<'_> {
         };
     }
 
-    pub async fn write_frame(&mut self, frame: Frame) -> ConnectionResult<()> {
-        let addr = match self.addr {
+    pub async fn write_frame(
+        &mut self,
+        frame: Frame,
+        addr: Option<SocketAddr>,
+    ) -> ConnectionResult<()> {
+        let write_addr = match self.addr {
             Some(addr) => addr,
-            None => return Err(Box::new(ConnectionError::NoClientAddress)),
+            None => match addr {
+                Some(addr) => addr,
+                None => return Err(Box::new(ConnectionError::NoClientAddress)),
+            },
         };
 
         self.encoder.encode_header(&frame.header, &mut self.buf)?;
@@ -70,7 +77,7 @@ impl Connection<'_> {
         let buffer_length = self.buf.len();
 
         self.sock
-            .send_to(&mut self.buf.buf[..buffer_length], addr)
+            .send_to(&mut self.buf.buf[..buffer_length], write_addr)
             .await?;
 
         self.buf.reset();

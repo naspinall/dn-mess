@@ -4,7 +4,7 @@ pub const MAX_MESSAGE_SIZE: usize = 512;
 
 type BufferResult<T> = Result<T, NetworkBufferError>;
 pub struct NetworkBuffer {
-    read_cursor: usize,
+    pub read_cursor: usize,
     write_cursor: usize,
     pub buf: [u8; 512],
 }
