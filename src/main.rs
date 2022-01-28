@@ -15,28 +15,22 @@ mod packets;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sock = UdpSocket::bind("127.0.0.1:8080").await?;
 
-    let google_dns_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
-
+    
     loop {
+        let google_dns_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
+        
         // Socket for incoming connections
-        let mut connection = Connection::new(&sock);
+        let mut connection = Connection::listen("53").await?;
 
         let frame = connection.read_frame().await?;
 
-        println!("{:?}", frame);
-
-        // Forward to google
-        let outgoing_sock = UdpSocket::bind("0.0.0.0:0").await?;
-
-        let mut outgoing_connection = Connection::new(&outgoing_sock);
+        let mut outgoing_connection = Connection::connect(google_dns_address).await?;
 
         outgoing_connection
-            .write_frame(frame, Some(google_dns_address.clone()))
+            .write_frame(frame, None)
             .await?;
 
         let frame = outgoing_connection.read_frame().await?;
-
-        println!("{:?}", frame);
 
         connection.write_frame(frame, None).await?;
     }

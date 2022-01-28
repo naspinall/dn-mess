@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr};
 
 use tokio::net::UdpSocket;
 
@@ -27,26 +27,49 @@ impl Frame {
     }
 }
 
-pub struct Connection<'a> {
-    sock: &'a UdpSocket,
+pub struct Connection {
+    sock: UdpSocket,
     addr: Option<SocketAddr>,
     buf: NetworkBuffer,
     encoder: FrameCoder,
 }
 
-impl Connection<'_> {
-    pub fn new(sock: &UdpSocket) -> Connection {
+impl Connection {
+    
+    pub async fn connect(addr: SocketAddr) -> ConnectionResult<Connection> {
+
         // Initializing buffers
         let buf = NetworkBuffer::new();
-
         let encoder = FrameCoder::new();
+        
+        // Bind to socket to listen for responses
+        let sock = UdpSocket::bind("0.0.0.0:0").await?;
 
-        return Connection {
+        return Ok(Connection {
             sock,
-            addr: None,
+            addr : Some(addr),
             buf,
             encoder,
-        };
+        })
+    }
+
+    pub async fn listen(port: &str) -> ConnectionResult<Connection> {
+        
+        // Initializing buffers
+        let buf = NetworkBuffer::new();
+        let encoder = FrameCoder::new();
+        
+        // Bind to socket to listen for responses
+        let sock = UdpSocket::bind(format!("0.0.0.0.{}",port)).await?;
+
+        return Ok(Connection {
+            sock,
+            addr : None,
+            buf,
+            encoder,
+        })
+
+
     }
 
     pub async fn write_frame(
