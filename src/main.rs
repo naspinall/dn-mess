@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use connection::Connection;
 use tokio::net::UdpSocket;
 
@@ -13,36 +15,29 @@ mod packets;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sock = UdpSocket::bind("127.0.0.1:8080").await?;
 
+    let google_dns_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
+
     loop {
+        // Socket for incoming connections
         let mut connection = Connection::new(&sock);
 
-        let mut frame = connection.read_frame().await?;
+        let frame = connection.read_frame().await?;
 
-        let client_question = match frame.questions.pop() {
-            Some(question) => question,
-            None => continue,
-        };
+        println!("{:?}", frame);
 
-        let answer = ResourceRecordPacket {
-            domain: client_question.domain.clone(),
-            record_type: packets::ResourceRecordType::ARecord,
-            class: packets::ResourceRecordClass::InternetAddress,
-            time_to_live: 300,
-            record_data: packets::ResourceRecordData::ARecord(0x08080808),
-        };
+        // Forward to google
+        let outgoing_sock = UdpSocket::bind("0.0.0.0:0").await?;
 
-        let question = QuestionPacket {
-            domain: client_question.domain.clone(),
-            class: QuestionClass::InternetAddress,
-            question_type: packets::QuestionType::ARecord,
-        };
+        let mut outgoing_connection = Connection::new(&outgoing_sock);
 
-        frame.header.question_count = 1;
-        frame.header.answer_count = 1;
+        outgoing_connection
+            .write_frame(frame, Some(google_dns_address.clone()))
+            .await?;
 
-        frame.add_question(question);
-        frame.add_answer(answer);
+        let frame = outgoing_connection.read_frame().await?;
 
-        connection.write_frame(frame).await?;
+        println!("{:?}", frame);
+
+        connection.write_frame(frame, None).await?;
     }
 }
