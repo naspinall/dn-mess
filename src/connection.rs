@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, IpAddr};
+use std::net::{SocketAddr};
 
 use tokio::net::UdpSocket;
 
@@ -16,15 +16,6 @@ pub struct Frame {
     pub header: HeaderPacket,
     pub questions: Vec<QuestionPacket>,
     pub answers: Vec<ResourceRecordPacket>,
-}
-
-impl Frame {
-    pub fn add_answer(&mut self, answer: ResourceRecordPacket) {
-        self.answers.push(answer);
-    }
-    pub fn add_question(&mut self, question: QuestionPacket) {
-        self.questions.push(question);
-    }
 }
 
 pub struct Connection {
@@ -45,7 +36,7 @@ impl Connection {
         // Bind to socket to listen for responses
         let sock = UdpSocket::bind("0.0.0.0:0").await?;
 
-        return Ok(Connection {
+        Ok(Connection {
             sock,
             addr : Some(addr),
             buf,
@@ -62,7 +53,7 @@ impl Connection {
         // Bind to socket to listen for responses
         let sock = UdpSocket::bind(format!("0.0.0.0.{}",port)).await?;
 
-        return Ok(Connection {
+        Ok(Connection {
             sock,
             addr : None,
             buf,
@@ -100,7 +91,7 @@ impl Connection {
         let buffer_length = self.buf.len();
 
         self.sock
-            .send_to(&mut self.buf.buf[..buffer_length], write_addr)
+            .send_to(&self.buf.buf[..buffer_length], write_addr)
             .await?;
 
         self.buf.reset();
@@ -109,7 +100,7 @@ impl Connection {
     }
 
     pub async fn read_frame(&mut self) -> ConnectionResult<Frame> {
-        let (len, addr) = self.sock.recv_from(&mut self.buf.buf).await?;
+        let (_len, addr) = self.sock.recv_from(&mut self.buf.buf).await?;
 
         let header = self.encoder.decode_header(&mut self.buf)?;
 
@@ -133,6 +124,6 @@ impl Connection {
 
         self.addr = Some(addr);
 
-        return Ok(frame);
+        Ok(frame)
     }
 }

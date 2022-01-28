@@ -13,14 +13,12 @@ mod packets;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let sock = UdpSocket::bind("127.0.0.1:8080").await?;
-
-    
+ 
     loop {
         let google_dns_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
         
         // Socket for incoming connections
-        let mut connection = Connection::listen("53").await?;
+        let mut connection = Connection::listen("8080").await?;
 
         let frame = connection.read_frame().await?;
 

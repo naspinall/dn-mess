@@ -22,22 +22,22 @@ impl FrameCoder {
         }
     }
 
-    pub fn set_compressed_domain(&mut self, domain: &String, buf: &NetworkBuffer) {
+    pub fn set_compressed_domain(&mut self, domain: &str, buf: &NetworkBuffer) {
         // Current index of compression
         let compressed_index = buf.len();
 
         // Set into hash map
         self.encoded_domains
-            .insert(domain.clone(), compressed_index);
+            .insert(domain.to_string(), compressed_index);
     }
 
-    pub fn get_compressed_domain(&self, domain: &String) -> Option<&usize> {
+    pub fn get_compressed_domain(&self, domain: &str) -> Option<&usize> {
         self.encoded_domains.get(domain)
     }
 
     pub fn encode_domain_label(
         &mut self,
-        label: &String,
+        label: &str,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Setting label length
@@ -58,22 +58,17 @@ impl FrameCoder {
     ) -> CodingResult<()> {
         let compressed_offset = 0xC000 | offset as u16;
 
-        return buf.put_u16(compressed_offset);
+        buf.put_u16(compressed_offset)
     }
 
-    pub fn encode_domain(&mut self, domain: &String, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Check if domain has already been cached
-        match self.get_compressed_domain(&domain) {
-            // Write the compressed full domain and return
-            Some(index) => return self.write_compressed_domain(*index, buf),
-            // Do nothing if domain has not been compressed
-            None => {}
-        };
+        if let Some(index) = self.get_compressed_domain(domain) { return self.write_compressed_domain(*index, buf) };
 
         // Set domain into hashmap
-        self.set_compressed_domain(domain, &buf);
+        self.set_compressed_domain(domain, buf);
 
-        let labels = domain.split(".");
+        let labels = domain.split('.');
 
         for label in labels {
             // Skip empty strings
@@ -132,8 +127,7 @@ impl FrameCoder {
 
         let mut options: u16 = 0x00;
 
-        options = options
-            | match header.packet_type {
+        options |= match header.packet_type {
                 PacketType::Question => 0x00,
                 PacketType::Answer => 0x80,
             };
@@ -207,7 +201,7 @@ impl FrameCoder {
         let name_server_count = buf.get_u16()?;
         let additional_records_count = buf.get_u16()?;
 
-        return Ok(HeaderPacket {
+        Ok(HeaderPacket {
             id,
             packet_type,
             op_code,
@@ -222,7 +216,7 @@ impl FrameCoder {
             answer_count,
             name_server_count,
             additional_records_count,
-        });
+        })
     }
 
     pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
@@ -244,11 +238,11 @@ impl FrameCoder {
             _ => QuestionClass::Unimplemented,
         };
 
-        return Ok(QuestionPacket {
+        Ok(QuestionPacket {
             domain,
             question_type,
             class,
-        });
+        })
     }
 
     pub fn decode_domain_label(
@@ -262,10 +256,10 @@ impl FrameCoder {
 
         while n < length {
             label.push(buf.get_u8()? as char);
-            n = n + 1;
+            n += 1;
         }
 
-        return Ok(label);
+        Ok(label)
     }
 
     pub fn decode_domain(&mut self, buf: &mut NetworkBuffer) -> CodingResult<String> {
@@ -302,7 +296,7 @@ impl FrameCoder {
         // Add to cache
         self.decoded_domains.insert(starting_index, domain.clone());
 
-        return Ok(domain);
+        Ok(domain)
     }
 
     pub fn decode_type(&mut self, buf: &mut NetworkBuffer) -> CodingResult<ResourceRecordType> {
@@ -328,7 +322,7 @@ impl FrameCoder {
             _ => ResourceRecordClass::Unimplemented,
         };
 
-        return Ok(class);
+        Ok(class)
     }
 
     pub fn decode_resource_record(
@@ -343,13 +337,13 @@ impl FrameCoder {
         let data_length = buf.get_u16()?;
         let payload = buf.get_u32()?;
 
-        return Ok(ResourceRecordPacket {
+        Ok(ResourceRecordPacket {
             domain,
             record_type,
             record_data: ResourceRecordData::ARecord(payload),
             class,
             time_to_live,
-        });
+        })
     }
 }
 
@@ -363,10 +357,10 @@ mod tests {
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 7] = [
-            0x05, 'h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8, 0x00,
+            0x05, b'h', b'e', b'l', b'l', b'o', 0x00,
         ];
 
-        buf.put_bytes(&domain_bytes).unwrap();
+        buf._put_bytes(&domain_bytes).unwrap();
 
         let domain = coder.decode_domain(&mut buf).unwrap();
 
@@ -380,11 +374,11 @@ mod tests {
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 11] = [
-            0x05, 'h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8, 0x03, 'c' as u8,
-            'o' as u8, 'm' as u8, 0x00,
+            0x05, b'h', b'e', b'l', b'l', b'o', 0x03, b'c',
+            b'o', b'm', 0x00,
         ];
 
-        buf.put_bytes(&domain_bytes).unwrap();
+        buf._put_bytes(&domain_bytes).unwrap();
 
         let domain = coder.decode_domain(&mut buf).unwrap();
 
@@ -397,9 +391,9 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let domain_bytes: [u8; 5] = ['h' as u8, 'e' as u8, 'l' as u8, 'l' as u8, 'o' as u8];
+        let domain_bytes: [u8; 5] = [b'h', b'e', b'l', b'l', b'o'];
 
-        buf.put_bytes(&domain_bytes).unwrap();
+        buf._put_bytes(&domain_bytes).unwrap();
 
         let domain = coder.decode_domain_label(5, &mut buf).unwrap();
 
@@ -414,21 +408,18 @@ mod tests {
 
         let header_bytes: [u8; 12] = [112, 181, 0xE5, 0x41, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
 
-        buf.put_bytes(&header_bytes).unwrap();
+        buf._put_bytes(&header_bytes).unwrap();
 
         let header = coder.decode_header(&mut buf).unwrap();
 
         assert_eq!(header.id, 28853);
         assert_eq!(header.op_code, 0x02);
-        assert!(match header.packet_type {
-            PacketType::Question => true,
-            _ => false,
-        });
+        assert!(matches!(header.packet_type, PacketType::Question));
 
-        assert_eq!(header.authoritative_answer, true);
-        assert_eq!(header.truncation, true);
-        assert_eq!(header.recursion_desired, true);
-        assert_eq!(header.recursion_available, true);
+        assert!(header.authoritative_answer);
+        assert!(header.truncation);
+        assert!(header.recursion_desired);
+        assert!(header.recursion_available);
         assert_eq!(header.response_code, 4);
 
         assert_eq!(header.question_count, 1);
@@ -446,20 +437,14 @@ mod tests {
             3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 1, 0, 1,
         ];
 
-        buf.put_bytes(&question_bytes).unwrap();
+        buf._put_bytes(&question_bytes).unwrap();
 
         let question = coder.decode_question(&mut buf).unwrap();
 
         assert_eq!(question.domain, String::from(".www.google.com"));
-        assert!(match question.question_type {
-            QuestionType::ARecord => true,
-            _ => false,
-        });
+        assert!(matches!(question.question_type, QuestionType::ARecord));
 
-        assert!(match question.class {
-            QuestionClass::InternetAddress => true,
-            _ => false,
-        })
+        assert!(matches!(question.class, QuestionClass::InternetAddress))
     }
 
     #[test]
@@ -472,20 +457,14 @@ mod tests {
             0, 0, 255, 0, 4, 8, 8, 8, 8,
         ];
 
-        buf.put_bytes(&resource_record_bytes).unwrap();
+        buf._put_bytes(&resource_record_bytes).unwrap();
 
         let resource_record = coder.decode_resource_record(&mut buf).unwrap();
 
         assert_eq!(resource_record.domain, String::from(".www.google.com"));
-        assert!(match resource_record.record_type {
-            ResourceRecordType::ARecord => true,
-            _ => false,
-        });
+        assert!(matches!(resource_record.record_type, ResourceRecordType::ARecord));
 
-        assert!(match resource_record.class {
-            ResourceRecordClass::InternetAddress => true,
-            _ => false,
-        });
+        assert!(matches!(resource_record.class, ResourceRecordClass::InternetAddress));
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.record_data {
@@ -503,7 +482,7 @@ mod tests {
             3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 192, 0,
         ];
 
-        buf.put_bytes(&pointer_domain_bytes).unwrap();
+        buf._put_bytes(&pointer_domain_bytes).unwrap();
 
         let original = coder.decode_domain(&mut buf).unwrap();
 

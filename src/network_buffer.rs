@@ -30,7 +30,7 @@ impl NetworkBuffer {
         // Increment index
         self.write_cursor += 1;
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn put_u16(&mut self, value: u16) -> BufferResult<()> {
@@ -43,7 +43,7 @@ impl NetworkBuffer {
 
         self.write_cursor += 2;
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn put_u32(&mut self, value: u32) -> BufferResult<()> {
@@ -61,7 +61,7 @@ impl NetworkBuffer {
         Ok(())
     }
 
-    pub fn put_bytes(&mut self, bytes: &[u8]) -> BufferResult<()> {
+    pub fn _put_bytes(&mut self, bytes: &[u8]) -> BufferResult<()> {
         for byte in bytes {
             self.put_u8(*byte)?
         }
@@ -79,7 +79,7 @@ impl NetworkBuffer {
 
         self.read_cursor += 1;
 
-        return Ok(byte);
+        Ok(byte)
     }
 
     pub fn get_u16(&mut self) -> BufferResult<u16> {
@@ -94,7 +94,7 @@ impl NetworkBuffer {
 
         self.read_cursor += 2;
 
-        return Ok(value);
+        Ok(value)
     }
 
     pub fn get_u32(&mut self) -> BufferResult<u32> {
@@ -104,13 +104,13 @@ impl NetworkBuffer {
         }
 
         let value = (self.buf[self.read_cursor] as u32) << 24
-            | (self.buf[self.read_cursor + 1] as u32) << 16 as u32
+            | (self.buf[self.read_cursor + 1] as u32) << 16
             | (self.buf[self.read_cursor + 2] as u32) << 8
             | self.buf[self.read_cursor + 3] as u32;
 
         self.read_cursor += 4;
 
-        return Ok(value);
+        Ok(value)
     }
 
     pub fn reset(&mut self) {
