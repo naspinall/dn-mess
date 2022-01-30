@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub enum PacketType {
-    Question,
-    Answer,
+    Query,
+    Response,
 }
 
 #[derive(Debug)]
@@ -48,6 +48,15 @@ pub enum ResourceRecordData {
 }
 
 #[derive(Debug)]
+pub enum ResponseCode {
+    None,
+    FormatError,
+    ServerError,
+    NameError,
+    NotImplemented,
+    Refused,
+}
+#[derive(Debug)]
 pub struct HeaderPacket {
     pub id: u16,
     pub packet_type: PacketType,
@@ -56,7 +65,7 @@ pub struct HeaderPacket {
     pub truncation: bool,
     pub recursion_desired: bool,
     pub recursion_available: bool,
-    pub response_code: u8,
+    pub response_code: ResponseCode,
 
     pub question_count: u16,
     pub answer_count: u16,

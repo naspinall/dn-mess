@@ -4,7 +4,7 @@ use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
     HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType, ResourceRecordClass,
-    ResourceRecordData, ResourceRecordPacket, ResourceRecordType,
+    ResourceRecordData, ResourceRecordPacket, ResourceRecordType, ResponseCode,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
@@ -63,7 +63,9 @@ impl FrameCoder {
 
     pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Check if domain has already been cached
-        if let Some(index) = self.get_compressed_domain(domain) { return self.write_compressed_domain(*index, buf) };
+        if let Some(index) = self.get_compressed_domain(domain) {
+            return self.write_compressed_domain(*index, buf);
+        };
 
         // Set domain into hashmap
         self.set_compressed_domain(domain, buf);
@@ -125,14 +127,38 @@ impl FrameCoder {
         // Encode the packet ID
         buf.put_u16(header.id)?;
 
-        let mut options: u16 = 0x00;
+        let mut options: u8 = 0x00;
 
         options |= match header.packet_type {
-                PacketType::Question => 0x00,
-                PacketType::Answer => 0x80,
-            };
+            PacketType::Query => 0x0,
+            PacketType::Response => 0x1,
+        };
 
-        buf.put_u16(options)?;
+        options |= header.op_code << 1;
+        options |= if header.authoritative_answer {
+            0x20
+        } else {
+            0x00
+        };
+        options |= if header.truncation { 0x40 } else { 0x00 };
+        options |= if header.recursion_desired { 0x80 } else { 0x00 };
+
+        buf.put_u8(options)?;
+
+        options = 0x00;
+
+        options |= if header.recursion_available { 0x1 } else { 0x0 };
+
+        options |= match header.response_code {
+            ResponseCode::None => 0,
+            ResponseCode::FormatError => 1,
+            ResponseCode::ServerError => 2,
+            ResponseCode::NameError => 3,
+            ResponseCode::NotImplemented => 4,
+            ResponseCode::Refused => 5,
+        } << 4;
+
+        buf.put_u8(options)?;
 
         // Ignore other fields for now
 
@@ -182,8 +208,8 @@ impl FrameCoder {
         let flag_byte = buf.get_u8()?;
 
         let packet_type = match 0x01 & flag_byte == 1 {
-            true => PacketType::Question,
-            false => PacketType::Answer,
+            true => PacketType::Response,
+            false => PacketType::Query,
         };
 
         let op_code = (flag_byte >> 1) as u8 & 0x0F;
@@ -194,7 +220,15 @@ impl FrameCoder {
         let flag_byte = buf.get_u8()?;
 
         let recursion_available = flag_byte & 0x01 == 1;
-        let response_code = flag_byte >> 4 & 0x0F;
+        let response_code = match flag_byte >> 4 & 0x0F {
+            0 => ResponseCode::None,
+            1 => ResponseCode::FormatError,
+            2 => ResponseCode::ServerError,
+            3 => ResponseCode::NameError,
+            4 => ResponseCode::NotImplemented,
+            5 => ResponseCode::Refused,
+            _ => return Err(NetworkBufferError::InvalidPacket),
+        };
 
         let question_count = buf.get_u16()?;
         let answer_count = buf.get_u16()?;
@@ -356,9 +390,7 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let domain_bytes: [u8; 7] = [
-            0x05, b'h', b'e', b'l', b'l', b'o', 0x00,
-        ];
+        let domain_bytes: [u8; 7] = [0x05, b'h', b'e', b'l', b'l', b'o', 0x00];
 
         buf._put_bytes(&domain_bytes).unwrap();
 
@@ -374,8 +406,7 @@ mod tests {
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 11] = [
-            0x05, b'h', b'e', b'l', b'l', b'o', 0x03, b'c',
-            b'o', b'm', 0x00,
+            0x05, b'h', b'e', b'l', b'l', b'o', 0x03, b'c', b'o', b'm', 0x00,
         ];
 
         buf._put_bytes(&domain_bytes).unwrap();
@@ -414,18 +445,45 @@ mod tests {
 
         assert_eq!(header.id, 28853);
         assert_eq!(header.op_code, 0x02);
-        assert!(matches!(header.packet_type, PacketType::Question));
+        assert!(matches!(header.packet_type, PacketType::Response));
 
         assert!(header.authoritative_answer);
         assert!(header.truncation);
         assert!(header.recursion_desired);
         assert!(header.recursion_available);
-        assert_eq!(header.response_code, 4);
+        assert!(matches!(header.response_code, ResponseCode::NotImplemented));
 
         assert_eq!(header.question_count, 1);
         assert_eq!(header.answer_count, 2);
         assert_eq!(header.name_server_count, 3);
         assert_eq!(header.additional_records_count, 65297);
+    }
+
+    #[test]
+    fn test_encode_header() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let header = HeaderPacket {
+            id: 28853,
+            op_code: 0x02,
+            packet_type: PacketType::Query,
+            authoritative_answer: true,
+            truncation: true,
+            recursion_desired: true,
+            recursion_available: true,
+            response_code: ResponseCode::NotImplemented,
+            question_count: 1,
+            answer_count: 2,
+            name_server_count: 3,
+            additional_records_count: 65297,
+        };
+
+        coder.encode_header(&header, &mut buf).unwrap();
+
+        let expected_bytes: [u8; 12] = [112, 181, 0xE4, 0x41, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+
+        assert_eq!(expected_bytes, buf.buf[..12]);
     }
 
     #[test]
@@ -462,9 +520,15 @@ mod tests {
         let resource_record = coder.decode_resource_record(&mut buf).unwrap();
 
         assert_eq!(resource_record.domain, String::from(".www.google.com"));
-        assert!(matches!(resource_record.record_type, ResourceRecordType::ARecord));
+        assert!(matches!(
+            resource_record.record_type,
+            ResourceRecordType::ARecord
+        ));
 
-        assert!(matches!(resource_record.class, ResourceRecordClass::InternetAddress));
+        assert!(matches!(
+            resource_record.class,
+            ResourceRecordClass::InternetAddress
+        ));
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.record_data {
