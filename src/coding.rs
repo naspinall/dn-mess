@@ -86,16 +86,16 @@ impl FrameCoder {
         buf.put_u8(0x00)
     }
 
-    pub fn encode_answer(
+    pub fn encode_resource_record(
         &mut self,
-        answer: &ResourceRecordPacket,
+        resource_record: &ResourceRecordPacket,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
-        self.encode_domain(&answer.domain, buf)?;
+        self.encode_domain(&resource_record.domain, buf)?;
 
         // Encode type
-        let type_bytes: u16 = match answer.record_type {
+        let type_bytes: u16 = match resource_record.record_type {
             ResourceRecordType::ARecord => 0x0001,
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
@@ -110,14 +110,17 @@ impl FrameCoder {
         buf.put_u16(1)?;
 
         // Encode time to live
-        buf.put_u32(answer.time_to_live)?;
+        buf.put_u32(resource_record.time_to_live)?;
 
         // Encoding RData length field
         buf.put_u16(0x04)?;
 
         // Encode RDdata field
-        buf.put_u16(0x0808)?;
-        buf.put_u16(0x0808)
+        match resource_record.record_data {
+            ResourceRecordData::ARecord(record) => buf.put_u32(record),
+            _ => Err(NetworkBufferError::InvalidPacket)
+        }
+
     }
 
     pub fn encode_header(
@@ -373,13 +376,22 @@ impl FrameCoder {
         let record_type = self.decode_type(buf)?;
         let class = self.decode_class(buf)?;
         let time_to_live = buf.get_u32()?;
-        let data_length = buf.get_u16()?;
-        let payload = buf.get_u32()?;
+
+        // TODO verify data length here
+        let _data_length = buf.get_u16()?;
+
+        let record_data = match record_type {
+            ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
+            ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_domain(buf)?),
+            ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
+            _ => return Err(NetworkBufferError::InvalidPacket)
+        };
+        
 
         Ok(ResourceRecordPacket {
             domain,
             record_type,
-            record_data: ResourceRecordData::ARecord(payload),
+            record_data,
             class,
             time_to_live,
         })
@@ -395,7 +407,7 @@ impl FrameCoder {
 
         // Encode question
         for answer in frame.answers.iter() {
-            self.encode_answer(answer, buf)?;
+            self.encode_resource_record(answer, buf)?;
         }
 
         Ok(())

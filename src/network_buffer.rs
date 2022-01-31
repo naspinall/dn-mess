@@ -61,6 +61,32 @@ impl NetworkBuffer {
         Ok(())
     }
 
+    pub fn put_u128(&mut self, value: u128) -> BufferResult<()> {
+        if self.write_cursor + 16 >= MAX_MESSAGE_SIZE {
+            return Err(NetworkBufferError::BufferFullError);
+        }
+
+        self.buf[self.write_cursor + 1]  = (value >> 112) as u8;
+        self.buf[self.write_cursor + 2]  = (value >> 104) as u8;
+        self.buf[self.write_cursor + 3]  = (value >> 96) as u8;
+        self.buf[self.write_cursor + 4]  = (value >> 88) as u8;
+        self.buf[self.write_cursor + 5]  = (value >> 80) as u8;
+        self.buf[self.write_cursor + 6]  = (value >> 72) as u8;
+        self.buf[self.write_cursor + 7]  = (value >> 64) as u8;
+        self.buf[self.write_cursor + 8]  = (value >> 56) as u8;
+        self.buf[self.write_cursor + 9]  = (value >> 48) as u8;
+        self.buf[self.write_cursor + 10] = (value  >> 40) as u8;
+        self.buf[self.write_cursor + 11] = (value  >> 32) as u8;
+        self.buf[self.write_cursor + 12] = (value  >> 24) as u8;
+        self.buf[self.write_cursor + 13] = (value  >> 16) as u8;
+        self.buf[self.write_cursor + 14] = (value  >> 8) as u8;
+        self.buf[self.write_cursor + 15] = (value & 0x00FF) as u8;
+
+        self.write_cursor += 16;
+
+        Ok(())
+    }
+
     pub fn _put_bytes(&mut self, bytes: &[u8]) -> BufferResult<()> {
         for byte in bytes {
             self.put_u8(*byte)?
@@ -109,6 +135,34 @@ impl NetworkBuffer {
             | self.buf[self.read_cursor + 3] as u32;
 
         self.read_cursor += 4;
+
+        Ok(value)
+    }
+
+    pub fn get_u128(&mut self) -> BufferResult<u128> {
+        // Checking bounds
+        if self.read_cursor + 2 >= MAX_MESSAGE_SIZE {
+            return Err(NetworkBufferError::BufferEmptyError);
+        }
+
+        let value = (self.buf[self.read_cursor] as u128) << 120
+            | (self.buf[self.read_cursor + 1] as u128) << 112
+            | (self.buf[self.read_cursor + 2] as u128) << 104
+            | (self.buf[self.read_cursor + 3] as u128) << 96
+            | (self.buf[self.read_cursor + 4] as u128) << 88
+            | (self.buf[self.read_cursor + 5] as u128) << 80
+            | (self.buf[self.read_cursor + 6] as u128) << 72
+            | (self.buf[self.read_cursor + 7] as u128) << 64
+            | (self.buf[self.read_cursor + 8] as u128) << 56
+            | (self.buf[self.read_cursor + 9] as u128) << 48
+            | (self.buf[self.read_cursor + 10] as u128) << 40
+            | (self.buf[self.read_cursor + 11] as u128) << 32
+            | (self.buf[self.read_cursor + 12] as u128) << 24
+            | (self.buf[self.read_cursor + 13] as u128) << 16
+            | (self.buf[self.read_cursor + 14] as u128) << 8
+            | (self.buf[self.read_cursor + 15] as u128);
+
+        self.read_cursor += 16;
 
         Ok(value)
     }
