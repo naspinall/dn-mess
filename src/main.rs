@@ -1,23 +1,15 @@
-use connection::Connection;
+use server::Server;
 
 mod coding;
 mod connection;
 mod errors;
 mod network_buffer;
 mod packets;
+mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    loop {
-        // Socket for incoming connections
-        let mut connection = Connection::listen("8080").await?;
-
-        let request_frame = connection.read_frame().await?;
-
-        if request_frame.header.recursion_desired {
-            let recurse_response = connection.recurse_query(&request_frame).await?;
-
-            connection.write_frame(&recurse_response, None).await?;
-        }
-    }
+    // Socket for incoming connections
+    Server::listen("8080").await?;
+    Ok(())
 }

@@ -12,14 +12,12 @@ pub struct Connection {
     sock: UdpSocket,
     addr: Option<SocketAddr>,
     buf: NetworkBuffer,
-    encoder: FrameCoder,
 }
 
 impl Connection {
     pub async fn connect(addr: SocketAddr) -> ConnectionResult<Connection> {
         // Initializing buffers
         let buf = NetworkBuffer::new();
-        let encoder = FrameCoder::new();
 
         // Bind to socket to listen for responses
         let sock = UdpSocket::bind("0.0.0.0:0").await?;
@@ -28,14 +26,12 @@ impl Connection {
             sock,
             addr: Some(addr),
             buf,
-            encoder,
         })
     }
 
     pub async fn listen(port: &str) -> ConnectionResult<Connection> {
         // Initializing buffers
         let buf = NetworkBuffer::new();
-        let encoder = FrameCoder::new();
 
         // Bind to socket to listen for responses
         let sock = UdpSocket::bind(format!("0.0.0.0:{}", port)).await?;
@@ -44,7 +40,6 @@ impl Connection {
             sock,
             addr: None,
             buf,
-            encoder,
         })
     }
 
@@ -61,7 +56,7 @@ impl Connection {
             },
         };
 
-        self.encoder.encode_frame(frame, &mut self.buf)?;
+        FrameCoder::new().encode_frame(frame, &mut self.buf)?;
 
         let buffer_length = self.buf.len();
 
@@ -78,7 +73,7 @@ impl Connection {
     pub async fn read_frame(&mut self) -> ConnectionResult<Frame> {
         let (_len, addr) = self.sock.recv_from(&mut self.buf.buf).await?;
 
-        let frame = self.encoder.decode_frame(&mut self.buf)?;
+        let frame = FrameCoder::new().decode_frame(&mut self.buf)?;
 
         self.addr = Some(addr);
 
@@ -86,27 +81,5 @@ impl Connection {
         self.buf.reset();
 
         Ok(frame)
-    }
-
-    pub async fn recurse_query(&self, request: &Frame) -> ConnectionResult<Frame> {
-        // Building query frame to upstream
-        let mut recurse_frame = request.build_query();
-
-        let mut recurse_connection =
-            Connection::connect(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
-
-        for question in request.questions.iter() {
-            recurse_frame.add_question(&question)
-        }
-
-        // Make request to google
-        recurse_connection.write_frame(&recurse_frame, None).await?;
-
-        // Read response
-        let mut response_frame = recurse_connection.read_frame().await?;
-
-        response_frame.header.id = request.header.id;
-
-        Ok(response_frame)
     }
 }
