@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType, ResourceRecordClass,
-    ResourceRecordData, ResourceRecordPacket, ResourceRecordType, ResponseCode,
+    Frame, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
+    ResourceRecordClass, ResourceRecordData, ResourceRecordPacket, ResourceRecordType,
+    ResponseCode,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
@@ -130,24 +131,28 @@ impl FrameCoder {
         let mut options: u8 = 0x00;
 
         options |= match header.packet_type {
-            PacketType::Query => 0x0,
-            PacketType::Response => 0x1,
+            PacketType::Query => 0x00,
+            PacketType::Response => 0x80,
         };
 
-        options |= header.op_code << 1;
+        options |= (header.op_code & 0x0F) << 3;
         options |= if header.authoritative_answer {
-            0x20
+            0x04
         } else {
             0x00
         };
-        options |= if header.truncation { 0x40 } else { 0x00 };
-        options |= if header.recursion_desired { 0x80 } else { 0x00 };
+        options |= if header.truncation { 0x02 } else { 0x00 };
+        options |= if header.recursion_desired { 0x01 } else { 0x00 };
 
         buf.put_u8(options)?;
 
         options = 0x00;
 
-        options |= if header.recursion_available { 0x1 } else { 0x0 };
+        options |= if header.recursion_available {
+            0x80
+        } else {
+            0x0
+        };
 
         options |= match header.response_code {
             ResponseCode::None => 0,
@@ -156,7 +161,7 @@ impl FrameCoder {
             ResponseCode::NameError => 3,
             ResponseCode::NotImplemented => 4,
             ResponseCode::Refused => 5,
-        } << 4;
+        } & 0x0F;
 
         buf.put_u8(options)?;
 
@@ -207,20 +212,20 @@ impl FrameCoder {
 
         let flag_byte = buf.get_u8()?;
 
-        let packet_type = match 0x01 & flag_byte == 1 {
+        let packet_type = match 0x80 & flag_byte == 0x80 {
             true => PacketType::Response,
             false => PacketType::Query,
         };
 
-        let op_code = (flag_byte >> 1) as u8 & 0x0F;
-        let authoritative_answer = flag_byte >> 5 & 0x01 == 1;
-        let truncation = flag_byte >> 6 & 0x01 == 1;
-        let recursion_desired = flag_byte >> 7 & 0x01 == 1;
+        let op_code = (flag_byte >> 3) as u8 & 0x0F;
+        let authoritative_answer = flag_byte >> 2 & 0x01 == 1;
+        let truncation = flag_byte >> 1 & 0x01 == 1;
+        let recursion_desired = flag_byte & 0x01 == 1;
 
         let flag_byte = buf.get_u8()?;
 
-        let recursion_available = flag_byte & 0x01 == 1;
-        let response_code = match flag_byte >> 4 & 0x0F {
+        let recursion_available = flag_byte >> 7 & 0x01 == 1;
+        let response_code = match flag_byte & 0x0F {
             0 => ResponseCode::None,
             1 => ResponseCode::FormatError,
             2 => ResponseCode::ServerError,
@@ -379,6 +384,47 @@ impl FrameCoder {
             time_to_live,
         })
     }
+
+    pub fn encode_frame(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        self.encode_header(&frame.header, buf)?;
+
+        // Encode question
+        for question in frame.questions.iter() {
+            self.encode_question(question, buf)?;
+        }
+
+        // Encode question
+        for answer in frame.answers.iter() {
+            self.encode_answer(answer, buf)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn decode_frame(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Frame> {
+        let header = self.decode_header(buf)?;
+
+        let mut questions: Vec<QuestionPacket> = Vec::new();
+        let mut answers: Vec<ResourceRecordPacket> = Vec::new();
+
+        // Encode question
+        for _ in 0..header.question_count {
+            let question = self.decode_question(buf)?;
+            questions.push(question);
+        }
+
+        // Encode question
+        for _ in 0..header.answer_count {
+            let answer = self.decode_resource_record(buf)?;
+            answers.push(answer);
+        }
+
+        Ok(Frame {
+            header,
+            questions,
+            answers,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -437,7 +483,7 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let header_bytes: [u8; 12] = [112, 181, 0xE5, 0x41, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+        let header_bytes: [u8; 12] = [112, 181, 151, 132, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
 
         buf._put_bytes(&header_bytes).unwrap();
 
@@ -467,7 +513,7 @@ mod tests {
         let header = HeaderPacket {
             id: 28853,
             op_code: 0x02,
-            packet_type: PacketType::Query,
+            packet_type: PacketType::Response,
             authoritative_answer: true,
             truncation: true,
             recursion_desired: true,
@@ -481,7 +527,7 @@ mod tests {
 
         coder.encode_header(&header, &mut buf).unwrap();
 
-        let expected_bytes: [u8; 12] = [112, 181, 0xE4, 0x41, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+        let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
 
         assert_eq!(expected_bytes, buf.buf[..12]);
     }

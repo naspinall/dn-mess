@@ -1,10 +1,10 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PacketType {
     Query,
     Response,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 
 pub enum QuestionType {
     ARecord,
@@ -13,14 +13,14 @@ pub enum QuestionType {
     NameServersRecord,
     Unimplemented,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 
 pub enum QuestionClass {
     InternetAddress,
     Unimplemented,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResourceRecordType {
     ARecord,
     AAAARecord,
@@ -34,20 +34,20 @@ pub enum ResourceRecordType {
     Unimplemented,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResourceRecordClass {
     InternetAddress,
     Unimplemented,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResourceRecordData {
     ARecord(u32),
     AAAARecord(u128),
     CName(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResponseCode {
     None,
     FormatError,
@@ -56,7 +56,7 @@ pub enum ResponseCode {
     NotImplemented,
     Refused,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderPacket {
     pub id: u16,
     pub packet_type: PacketType,
@@ -73,18 +73,71 @@ pub struct HeaderPacket {
     pub additional_records_count: u16,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QuestionPacket {
     pub domain: String,
     pub question_type: QuestionType,
     pub class: QuestionClass,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResourceRecordPacket {
     pub domain: String,
     pub record_type: ResourceRecordType,
     pub class: ResourceRecordClass,
     pub time_to_live: u32,
     pub record_data: ResourceRecordData,
+}
+
+#[derive(Debug)]
+pub struct Frame {
+    pub header: HeaderPacket,
+    pub questions: Vec<QuestionPacket>,
+    pub answers: Vec<ResourceRecordPacket>,
+}
+
+impl Frame {
+    fn response_frame(&self, response_type: PacketType) -> Frame {
+        Frame {
+            header: HeaderPacket {
+                id: self.header.id,
+                packet_type: response_type,
+                // Only support standard queries
+                op_code: 0,
+                // These options will be set elsewhere
+                authoritative_answer: false,
+                truncation: false,
+                recursion_desired: false,
+                recursion_available: false,
+                // Default to no error
+                response_code: ResponseCode::None,
+
+                // Zero out
+                question_count: 0,
+                answer_count: 0,
+                name_server_count: 0,
+                additional_records_count: 0,
+            },
+            questions: vec![],
+            answers: vec![],
+        }
+    }
+
+    pub fn build_query(&self) -> Frame {
+        self.response_frame(PacketType::Query)
+    }
+
+    pub fn build_response(&self) -> Frame {
+        self.response_frame(PacketType::Response)
+    }
+
+    pub fn add_question(&mut self, question: &QuestionPacket) {
+        self.questions.push(question.clone());
+        self.header.question_count += 1;
+    }
+
+    pub fn add_answer(&mut self, answer: &ResourceRecordPacket) {
+        self.answers.push(answer.clone());
+        self.header.answer_count += 1;
+    }
 }
