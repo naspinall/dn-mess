@@ -4,15 +4,7 @@ pub enum PacketType {
     Response,
 }
 
-#[derive(Debug, Clone)]
 
-pub enum QuestionType {
-    ARecord,
-    CNameRecord,
-    MXRecord,
-    NameServersRecord,
-    Unimplemented,
-}
 #[derive(Debug, Clone)]
 
 pub enum QuestionClass {
@@ -20,7 +12,7 @@ pub enum QuestionClass {
     Unimplemented,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResourceRecordType {
     ARecord,
     AAAARecord,
@@ -76,7 +68,7 @@ pub struct HeaderPacket {
 #[derive(Debug, Clone)]
 pub struct QuestionPacket {
     pub domain: String,
-    pub question_type: QuestionType,
+    pub question_type: ResourceRecordType,
     pub class: QuestionClass,
 }
 
@@ -97,10 +89,10 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn response_frame(&self, response_type: PacketType) -> Frame {
+    fn response_frame(&self, response_type: PacketType, id: u16) -> Frame {
         Frame {
             header: HeaderPacket {
-                id: self.header.id,
+                id,
                 packet_type: response_type,
                 // Only support standard queries
                 op_code: 0,
@@ -123,12 +115,12 @@ impl Frame {
         }
     }
 
-    pub fn build_query(&self) -> Frame {
-        self.response_frame(PacketType::Query)
+    pub fn build_query(&self, id: u16) -> Frame {
+        self.response_frame(PacketType::Query, id)
     }
 
-    pub fn build_response(&self) -> Frame {
-        self.response_frame(PacketType::Response)
+    pub fn build_response(&self, id: u16) -> Frame {
+        self.response_frame(PacketType::Response, id)
     }
 
     pub fn add_question(&mut self, question: &QuestionPacket) {

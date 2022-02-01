@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    Frame, HeaderPacket, PacketType, QuestionClass, QuestionPacket, QuestionType,
-    ResourceRecordClass, ResourceRecordData, ResourceRecordPacket, ResourceRecordType,
+    Frame, HeaderPacket, PacketType, QuestionClass, QuestionPacket, ResourceRecordType,
+    ResourceRecordClass, ResourceRecordData, ResourceRecordPacket,
     ResponseCode,
 };
 
@@ -193,10 +193,10 @@ impl FrameCoder {
 
         // Encode type
         let type_bytes: u16 = match question.question_type {
-            QuestionType::ARecord => 0x0001,
-            QuestionType::NameServersRecord => 0x0002,
-            QuestionType::CNameRecord => 0x0005,
-            QuestionType::MXRecord => 0x000f,
+            ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::NSRecord => 0x0002,
+            ResourceRecordType::CNameRecord => 0x0005,
+            ResourceRecordType::MXRecord => 0x000f,
             _ => 0x0000,
         };
 
@@ -267,11 +267,11 @@ impl FrameCoder {
 
         // Decode the type
         let question_type = match buf.get_u16()? {
-            0x0001 => QuestionType::ARecord,
-            0x0002 => QuestionType::NameServersRecord,
-            0x0005 => QuestionType::CNameRecord,
-            0x000f => QuestionType::MXRecord,
-            _ => QuestionType::Unimplemented,
+            0x0001 => ResourceRecordType::ARecord,
+            0x0002 => ResourceRecordType::NSRecord,
+            0x0005 => ResourceRecordType::CNameRecord,
+            0x000f => ResourceRecordType::MXRecord,
+            _ => ResourceRecordType::Unimplemented,
         };
 
         // Decode the class
@@ -558,7 +558,7 @@ mod tests {
         let question = coder.decode_question(&mut buf).unwrap();
 
         assert_eq!(question.domain, String::from(".www.google.com"));
-        assert!(matches!(question.question_type, QuestionType::ARecord));
+        assert!(matches!(question.question_type, ResourceRecordType::ARecord));
 
         assert!(matches!(question.class, QuestionClass::InternetAddress))
     }

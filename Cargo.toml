@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 # TODO remove features that aren't required here
 tokio = { version = "1", features = ["full"] }
+rand = { version = "*" }
