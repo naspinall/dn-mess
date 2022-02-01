@@ -4,7 +4,6 @@ pub enum PacketType {
     Response,
 }
 
-
 #[derive(Debug, Clone)]
 
 pub enum QuestionClass {
@@ -89,6 +88,32 @@ pub struct Frame {
 }
 
 impl Frame {
+    pub fn new(id: u16, packet_type: PacketType) -> Frame {
+        Frame {
+            header: HeaderPacket {
+                id,
+                packet_type,
+                // Only support standard queries
+                op_code: 0,
+                // These options will be set elsewhere
+                authoritative_answer: false,
+                truncation: false,
+                recursion_desired: true,
+                recursion_available: false,
+                // Default to no error
+                response_code: ResponseCode::None,
+
+                // Zero out
+                question_count: 0,
+                answer_count: 0,
+                name_server_count: 0,
+                additional_records_count: 0,
+            },
+            questions: vec![],
+            answers: vec![],
+        }
+    }
+
     fn response_frame(&self, response_type: PacketType, id: u16) -> Frame {
         Frame {
             header: HeaderPacket {
@@ -119,8 +144,8 @@ impl Frame {
         self.response_frame(PacketType::Query, id)
     }
 
-    pub fn build_response(&self, id: u16) -> Frame {
-        self.response_frame(PacketType::Response, id)
+    pub fn build_response(&self) -> Frame {
+        self.response_frame(PacketType::Response, self.header.id)
     }
 
     pub fn add_question(&mut self, question: &QuestionPacket) {

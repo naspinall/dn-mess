@@ -1,5 +1,6 @@
 use server::Server;
 
+mod client;
 mod coding;
 mod connection;
 mod errors;

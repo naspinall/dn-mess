@@ -1,10 +1,13 @@
-use std::net::SocketAddr;
-use rand::{Rng, prelude::ThreadRng};
-
+use rand::{prelude::ThreadRng, Rng};
+use std::{net::SocketAddr, vec};
 
 mod cache;
 
-use crate::{connection::Connection, packets::Frame};
+use crate::{
+    client::Client,
+    connection::Connection,
+    packets::{Frame, QuestionPacket, ResourceRecordData, ResourceRecordPacket},
+};
 
 use self::cache::HashCache;
 
@@ -12,55 +15,94 @@ type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 pub struct Server {
     cache: HashCache,
-    rng : ThreadRng
+    rng: ThreadRng,
 }
 
 impl Server {
-
     pub fn new() -> Server {
         Server {
-            rng : rand::thread_rng(),
+            rng: rand::thread_rng(),
             cache: HashCache::new(),
         }
     }
 
     pub async fn listen(&mut self, port: &str) -> ServerResult<()> {
-
         let mut listener = Connection::listen(port).await?;
 
         loop {
-   
             let (addr, request) = listener.read_frame().await?;
 
-            if request.header.recursion_desired {
-                
-                let recurse_response = self.recurse_query(&request).await?;
-    
-                listener.write_frame(&recurse_response, &addr).await?;
+            let mut answers: Vec<ResourceRecordPacket> = vec![];
+
+            // Copy of the questions we can mutate
+            let mut questions: Vec<QuestionPacket> = request.questions.clone();
+
+            for (i, question) in request.questions.iter().enumerate() {
+                // Checking the cache for any answers in the cache
+                match self.cache.get(&question.question_type, &question.domain) {
+                    Some((record_data, time_to_live)) => {
+                        answers.push(ResourceRecordPacket {
+                            domain: question.domain.clone(),
+                            record_type: question.question_type.clone(),
+                            class: crate::packets::ResourceRecordClass::InternetAddress,
+                            time_to_live,
+                            record_data,
+                        });
+                        // Remove for questions as we have a cached version
+                        questions.remove(i)
+                    }
+                    None => continue,
+                };
             }
+
+            // Check all questions, detemine all in the cache
+            if request.header.recursion_desired && !questions.is_empty() {
+                let mut recurse_request =
+                    Frame::new(self.rng.gen(), crate::packets::PacketType::Query);
+
+                // Add all remaning questions to the recursion packet
+                for question in questions.iter() {
+                    recurse_request.add_question(question)
+                }
+
+                // All the answers given from recursion
+                let mut recursion_answers = self.recurse_query(&recurse_request).await?;
+
+                // Add all the answers to the cache
+                for answer in recursion_answers.iter() {
+                    self.cache.put(
+                        &answer.record_type,
+                        &answer.domain,
+                        &answer.record_data,
+                        answer.time_to_live,
+                    );
+                }
+
+                answers.append(&mut recursion_answers)
+            }
+
+            let mut response = request.build_response();
+
+            for question in questions.iter() {
+                response.add_question(question);
+            }
+
+            for answer in answers.iter() {
+                response.add_answer(answer);
+            }
+
+            listener.write_frame(&response, &addr).await?;
         }
     }
 
-    pub async fn recurse_query(&mut self, request: &Frame) -> ServerResult<Frame> {
-        // Building query frame to upstream
-        let mut recurse_frame = request.build_query(self.rng.gen());
+    pub async fn recurse_query(
+        &mut self,
+        request: &Frame,
+    ) -> ServerResult<Vec<ResourceRecordPacket>> {
+        let mut client = Client::dial(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
 
-        let mut response_connection = Connection::listen("0").await?;
+        let response = client.send(request).await?;
 
-        let addr = SocketAddr::from(([8, 8, 8, 8], 53));
-
-        for question in request.questions.iter() {
-            recurse_frame.add_question(question)
-        }
-
-        // Make request to google
-        response_connection.write_frame(&recurse_frame, &addr).await?;
-
-        // Read response
-        let (_, mut response_frame) = response_connection.read_frame().await?;
-
-        response_frame.header.id = request.header.id;
-
-        Ok(response_frame)
+        Ok(response.answers)
     }
 }
