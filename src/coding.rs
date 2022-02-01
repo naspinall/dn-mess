@@ -3,9 +3,8 @@ use std::collections::HashMap;
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    Frame, HeaderPacket, PacketType, QuestionClass, QuestionPacket, ResourceRecordType,
-    ResourceRecordClass, ResourceRecordData, ResourceRecordPacket,
-    ResponseCode,
+    Frame, PacketType, QuestionClass, QuestionPacket, ResourceRecordClass, ResourceRecordData,
+    ResourceRecordPacket, ResourceRecordType, ResponseCode,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
@@ -118,46 +117,37 @@ impl FrameCoder {
         // Encode RDdata field
         match resource_record.record_data {
             ResourceRecordData::ARecord(record) => buf.put_u32(record),
-            _ => Err(NetworkBufferError::InvalidPacket)
+            _ => Err(NetworkBufferError::InvalidPacket),
         }
-
     }
 
-    pub fn encode_header(
-        &mut self,
-        header: &HeaderPacket,
-        buf: &mut NetworkBuffer,
-    ) -> CodingResult<()> {
+    pub fn encode_header(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Encode the packet ID
-        buf.put_u16(header.id)?;
+        buf.put_u16(frame.id)?;
 
         let mut options: u8 = 0x00;
 
-        options |= match header.packet_type {
+        options |= match frame.packet_type {
             PacketType::Query => 0x00,
             PacketType::Response => 0x80,
         };
 
-        options |= (header.op_code & 0x0F) << 3;
-        options |= if header.authoritative_answer {
+        options |= (frame.op_code & 0x0F) << 3;
+        options |= if frame.authoritative_answer {
             0x04
         } else {
             0x00
         };
-        options |= if header.truncation { 0x02 } else { 0x00 };
-        options |= if header.recursion_desired { 0x01 } else { 0x00 };
+        options |= if frame.truncation { 0x02 } else { 0x00 };
+        options |= if frame.recursion_desired { 0x01 } else { 0x00 };
 
         buf.put_u8(options)?;
 
         options = 0x00;
 
-        options |= if header.recursion_available {
-            0x80
-        } else {
-            0x0
-        };
+        options |= if frame.recursion_available { 0x80 } else { 0x0 };
 
-        options |= match header.response_code {
+        options |= match frame.response_code {
             ResponseCode::None => 0,
             ResponseCode::FormatError => 1,
             ResponseCode::ServerError => 2,
@@ -171,16 +161,16 @@ impl FrameCoder {
         // Ignore other fields for now
 
         // Encode Question Count
-        buf.put_u16(header.question_count)?;
+        buf.put_u16(frame.question_count)?;
 
         // Encode Answer Count
-        buf.put_u16(header.answer_count)?;
+        buf.put_u16(frame.answer_count)?;
 
         // Encode Name Server Count
-        buf.put_u16(header.name_server_count)?;
+        buf.put_u16(frame.name_server_count)?;
         // Encode Additional Records Count
 
-        buf.put_u16(header.additional_records_count)
+        buf.put_u16(frame.additional_records_count)
     }
 
     pub fn encode_question(
@@ -205,60 +195,6 @@ impl FrameCoder {
 
         // Encode class
         buf.put_u16(1)
-    }
-
-    pub fn decode_header(&mut self, buf: &mut NetworkBuffer) -> CodingResult<HeaderPacket> {
-        // decode ID field
-        let id = buf.get_u16()?;
-
-        // decode query response bit
-
-        let flag_byte = buf.get_u8()?;
-
-        let packet_type = match 0x80 & flag_byte == 0x80 {
-            true => PacketType::Response,
-            false => PacketType::Query,
-        };
-
-        let op_code = (flag_byte >> 3) as u8 & 0x0F;
-        let authoritative_answer = flag_byte >> 2 & 0x01 == 1;
-        let truncation = flag_byte >> 1 & 0x01 == 1;
-        let recursion_desired = flag_byte & 0x01 == 1;
-
-        let flag_byte = buf.get_u8()?;
-
-        let recursion_available = flag_byte >> 7 & 0x01 == 1;
-        let response_code = match flag_byte & 0x0F {
-            0 => ResponseCode::None,
-            1 => ResponseCode::FormatError,
-            2 => ResponseCode::ServerError,
-            3 => ResponseCode::NameError,
-            4 => ResponseCode::NotImplemented,
-            5 => ResponseCode::Refused,
-            _ => return Err(NetworkBufferError::InvalidPacket),
-        };
-
-        let question_count = buf.get_u16()?;
-        let answer_count = buf.get_u16()?;
-        let name_server_count = buf.get_u16()?;
-        let additional_records_count = buf.get_u16()?;
-
-        Ok(HeaderPacket {
-            id,
-            packet_type,
-            op_code,
-
-            authoritative_answer,
-            truncation,
-            recursion_desired,
-            recursion_available,
-            response_code,
-
-            question_count,
-            answer_count,
-            name_server_count,
-            additional_records_count,
-        })
     }
 
     pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
@@ -384,9 +320,8 @@ impl FrameCoder {
             ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
             ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_domain(buf)?),
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
-            _ => return Err(NetworkBufferError::InvalidPacket)
+            _ => return Err(NetworkBufferError::InvalidPacket),
         };
-        
 
         Ok(ResourceRecordPacket {
             domain,
@@ -398,7 +333,7 @@ impl FrameCoder {
     }
 
     pub fn encode_frame(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
-        self.encode_header(&frame.header, buf)?;
+        self.encode_header(&frame, buf)?;
 
         // Encode question
         for question in frame.questions.iter() {
@@ -414,25 +349,71 @@ impl FrameCoder {
     }
 
     pub fn decode_frame(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Frame> {
-        let header = self.decode_header(buf)?;
+        // decode ID field
+        let id = buf.get_u16()?;
+
+        // decode query response bit
+
+        let flag_byte = buf.get_u8()?;
+
+        let packet_type = match 0x80 & flag_byte == 0x80 {
+            true => PacketType::Response,
+            false => PacketType::Query,
+        };
+
+        let op_code = (flag_byte >> 3) as u8 & 0x0F;
+        let authoritative_answer = flag_byte >> 2 & 0x01 == 1;
+        let truncation = flag_byte >> 1 & 0x01 == 1;
+        let recursion_desired = flag_byte & 0x01 == 1;
+
+        let flag_byte = buf.get_u8()?;
+
+        let recursion_available = flag_byte >> 7 & 0x01 == 1;
+        let response_code = match flag_byte & 0x0F {
+            0 => ResponseCode::None,
+            1 => ResponseCode::FormatError,
+            2 => ResponseCode::ServerError,
+            3 => ResponseCode::NameError,
+            4 => ResponseCode::NotImplemented,
+            5 => ResponseCode::Refused,
+            _ => return Err(NetworkBufferError::InvalidPacket),
+        };
+
+        let question_count = buf.get_u16()?;
+        let answer_count = buf.get_u16()?;
+        let name_server_count = buf.get_u16()?;
+        let additional_records_count = buf.get_u16()?;
 
         let mut questions: Vec<QuestionPacket> = Vec::new();
         let mut answers: Vec<ResourceRecordPacket> = Vec::new();
 
         // Encode question
-        for _ in 0..header.question_count {
+        for _ in 0..question_count {
             let question = self.decode_question(buf)?;
             questions.push(question);
         }
 
         // Encode question
-        for _ in 0..header.answer_count {
+        for _ in 0..answer_count {
             let answer = self.decode_resource_record(buf)?;
             answers.push(answer);
         }
 
         Ok(Frame {
-            header,
+            id,
+            packet_type,
+            op_code,
+
+            authoritative_answer,
+            truncation,
+            recursion_desired,
+            recursion_available,
+            response_code,
+
+            question_count,
+            answer_count,
+            name_server_count,
+            additional_records_count,
             questions,
             answers,
         })
@@ -495,34 +476,34 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let header_bytes: [u8; 12] = [112, 181, 151, 132, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+        let header_bytes: [u8; 12] = [112, 181, 151, 132, 0, 0, 0, 0, 0, 0, 0, 0];
 
         buf._put_bytes(&header_bytes).unwrap();
 
-        let header = coder.decode_header(&mut buf).unwrap();
+        let frame = coder.decode_frame(&mut buf).unwrap();
 
-        assert_eq!(header.id, 28853);
-        assert_eq!(header.op_code, 0x02);
-        assert!(matches!(header.packet_type, PacketType::Response));
+        assert_eq!(frame.id, 28853);
+        assert_eq!(frame.op_code, 0x02);
+        assert!(matches!(frame.packet_type, PacketType::Response));
 
-        assert!(header.authoritative_answer);
-        assert!(header.truncation);
-        assert!(header.recursion_desired);
-        assert!(header.recursion_available);
-        assert!(matches!(header.response_code, ResponseCode::NotImplemented));
+        assert!(frame.authoritative_answer);
+        assert!(frame.truncation);
+        assert!(frame.recursion_desired);
+        assert!(frame.recursion_available);
+        assert!(matches!(frame.response_code, ResponseCode::NotImplemented));
 
-        assert_eq!(header.question_count, 1);
-        assert_eq!(header.answer_count, 2);
-        assert_eq!(header.name_server_count, 3);
-        assert_eq!(header.additional_records_count, 65297);
+        assert_eq!(frame.question_count, 0);
+        assert_eq!(frame.answer_count, 0);
+        assert_eq!(frame.name_server_count, 0);
+        assert_eq!(frame.additional_records_count, 0);
     }
 
     #[test]
-    fn test_encode_header() {
+    fn test_encode_frame() {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let header = HeaderPacket {
+        let frame = Frame {
             id: 28853,
             op_code: 0x02,
             packet_type: PacketType::Response,
@@ -535,9 +516,11 @@ mod tests {
             answer_count: 2,
             name_server_count: 3,
             additional_records_count: 65297,
+            questions: Vec::new(),
+            answers: Vec::new(),
         };
 
-        coder.encode_header(&header, &mut buf).unwrap();
+        coder.encode_frame(&frame, &mut buf).unwrap();
 
         let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
 
@@ -558,7 +541,10 @@ mod tests {
         let question = coder.decode_question(&mut buf).unwrap();
 
         assert_eq!(question.domain, String::from(".www.google.com"));
-        assert!(matches!(question.question_type, ResourceRecordType::ARecord));
+        assert!(matches!(
+            question.question_type,
+            ResourceRecordType::ARecord
+        ));
 
         assert!(matches!(question.class, QuestionClass::InternetAddress))
     }

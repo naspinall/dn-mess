@@ -20,16 +20,14 @@ impl fmt::Display for NetworkBufferError {
 }
 
 #[derive(Debug)]
-pub enum ConnectionError {
-    NoClientAddress
-}
+pub enum ConnectionError {}
 
 impl std::error::Error for ConnectionError {}
 
 impl fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ConnectionError::NoClientAddress => write!(f, "No client address")
+            _ => write!(f, "Connection error"),
         }
     }
 }

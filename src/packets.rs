@@ -47,22 +47,6 @@ pub enum ResponseCode {
     NotImplemented,
     Refused,
 }
-#[derive(Debug, Clone)]
-pub struct HeaderPacket {
-    pub id: u16,
-    pub packet_type: PacketType,
-    pub op_code: u8,
-    pub authoritative_answer: bool,
-    pub truncation: bool,
-    pub recursion_desired: bool,
-    pub recursion_available: bool,
-    pub response_code: ResponseCode,
-
-    pub question_count: u16,
-    pub answer_count: u16,
-    pub name_server_count: u16,
-    pub additional_records_count: u16,
-}
 
 #[derive(Debug, Clone)]
 pub struct QuestionPacket {
@@ -82,7 +66,20 @@ pub struct ResourceRecordPacket {
 
 #[derive(Debug)]
 pub struct Frame {
-    pub header: HeaderPacket,
+    pub id: u16,
+    pub packet_type: PacketType,
+    pub op_code: u8,
+    pub authoritative_answer: bool,
+    pub truncation: bool,
+    pub recursion_desired: bool,
+    pub recursion_available: bool,
+    pub response_code: ResponseCode,
+
+    pub question_count: u16,
+    pub answer_count: u16,
+    pub name_server_count: u16,
+    pub additional_records_count: u16,
+
     pub questions: Vec<QuestionPacket>,
     pub answers: Vec<ResourceRecordPacket>,
 }
@@ -90,25 +87,24 @@ pub struct Frame {
 impl Frame {
     pub fn new(id: u16, packet_type: PacketType) -> Frame {
         Frame {
-            header: HeaderPacket {
-                id,
-                packet_type,
-                // Only support standard queries
-                op_code: 0,
-                // These options will be set elsewhere
-                authoritative_answer: false,
-                truncation: false,
-                recursion_desired: true,
-                recursion_available: false,
-                // Default to no error
-                response_code: ResponseCode::None,
+            id,
+            packet_type,
+            // Only support standard queries
+            op_code: 0,
+            // These options will be set elsewhere
+            authoritative_answer: false,
+            truncation: false,
+            recursion_desired: true,
+            recursion_available: false,
+            // Default to no error
+            response_code: ResponseCode::None,
 
-                // Zero out
-                question_count: 0,
-                answer_count: 0,
-                name_server_count: 0,
-                additional_records_count: 0,
-            },
+            // Zero out
+            question_count: 0,
+            answer_count: 0,
+            name_server_count: 0,
+            additional_records_count: 0,
+
             questions: vec![],
             answers: vec![],
         }
@@ -116,25 +112,24 @@ impl Frame {
 
     fn response_frame(&self, response_type: PacketType, id: u16) -> Frame {
         Frame {
-            header: HeaderPacket {
-                id,
-                packet_type: response_type,
-                // Only support standard queries
-                op_code: 0,
-                // These options will be set elsewhere
-                authoritative_answer: false,
-                truncation: false,
-                recursion_desired: false,
-                recursion_available: false,
-                // Default to no error
-                response_code: ResponseCode::None,
+            id,
+            packet_type: response_type,
+            // Only support standard queries
+            op_code: 0,
+            // These options will be set elsewhere
+            authoritative_answer: false,
+            truncation: false,
+            recursion_desired: false,
+            recursion_available: false,
+            // Default to no error
+            response_code: ResponseCode::None,
 
-                // Zero out
-                question_count: 0,
-                answer_count: 0,
-                name_server_count: 0,
-                additional_records_count: 0,
-            },
+            // Zero out
+            question_count: 0,
+            answer_count: 0,
+            name_server_count: 0,
+            additional_records_count: 0,
+
             questions: vec![],
             answers: vec![],
         }
@@ -145,16 +140,16 @@ impl Frame {
     }
 
     pub fn build_response(&self) -> Frame {
-        self.response_frame(PacketType::Response, self.header.id)
+        self.response_frame(PacketType::Response, self.id)
     }
 
     pub fn add_question(&mut self, question: &QuestionPacket) {
         self.questions.push(question.clone());
-        self.header.question_count += 1;
+        self.question_count += 1;
     }
 
     pub fn add_answer(&mut self, answer: &ResourceRecordPacket) {
         self.answers.push(answer.clone());
-        self.header.answer_count += 1;
+        self.answer_count += 1;
     }
 }

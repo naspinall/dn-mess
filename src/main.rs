@@ -11,6 +11,6 @@ mod server;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = Server::new();
-    server.listen("8080").await?;
+    server.listen(8080).await?;
     Ok(())
 }

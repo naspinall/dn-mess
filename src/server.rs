@@ -6,7 +6,7 @@ mod cache;
 use crate::{
     client::Client,
     connection::Connection,
-    packets::{Frame, QuestionPacket, ResourceRecordData, ResourceRecordPacket},
+    packets::{Frame, QuestionPacket, ResourceRecordPacket},
 };
 
 use self::cache::HashCache;
@@ -26,7 +26,7 @@ impl Server {
         }
     }
 
-    pub async fn listen(&mut self, port: &str) -> ServerResult<()> {
+    pub async fn listen(&mut self, port: usize) -> ServerResult<()> {
         let mut listener = Connection::listen(port).await?;
 
         loop {
@@ -55,8 +55,8 @@ impl Server {
                 };
             }
 
-            // Check all questions, detemine all in the cache
-            if request.header.recursion_desired && !questions.is_empty() {
+            // Check all questions, determine all in the cache
+            if request.recursion_desired && !questions.is_empty() {
                 let mut recurse_request =
                     Frame::new(self.rng.gen(), crate::packets::PacketType::Query);
 

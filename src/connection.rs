@@ -12,7 +12,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn listen(port: &str) -> ConnectionResult<Connection> {
+    pub async fn listen(port: usize) -> ConnectionResult<Connection> {
         // Initializing buffers
         let buf = NetworkBuffer::new();
 
