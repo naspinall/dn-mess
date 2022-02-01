@@ -39,7 +39,7 @@ impl FrameCoder {
         &mut self,
         label: &str,
         buf: &mut NetworkBuffer,
-    ) -> CodingResult<()> {
+    ) -> CodingResult<usize> {
         // Setting label length
         buf.put_u8(label.len() as u8)?;
 
@@ -48,7 +48,7 @@ impl FrameCoder {
             buf.put_u8(character as u8)?;
         }
 
-        Ok(())
+        Ok(label.len())
     }
 
     pub fn write_compressed_domain(
@@ -61,10 +61,28 @@ impl FrameCoder {
         buf.put_u16(compressed_offset)
     }
 
-    pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    fn calculate_domain_length(domain: &str) -> usize {
+        let mut total_length = 0;
+
+        let labels = domain.split(".");
+
+        labels
+            .into_iter()
+            .for_each(|label| total_length += label.len() + 1);
+
+        total_length
+    }
+
+    pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
+        let mut encoded_length = 0;
+
         // Check if domain has already been cached
         if let Some(index) = self.get_compressed_domain(domain) {
-            return self.write_compressed_domain(*index, buf);
+            // Write the whole compressed domain
+            self.write_compressed_domain(*index, buf)?;
+
+            // Will only ever be one byte
+            return Ok(1);
         };
 
         // Set domain into hashmap
@@ -78,11 +96,18 @@ impl FrameCoder {
                 continue;
             }
 
-            self.encode_domain_label(&label.to_string(), buf)?;
+            // Add length plus one for length byte
+            encoded_length += self.encode_domain_label(&label.to_string(), buf)? + 1;
         }
 
         // Terminating domain name
-        buf.put_u8(0x00)
+        buf.put_u8(0x00)?;
+
+        // Add for null byte
+        encoded_length += 1;
+
+        // Return length for null byte
+        Ok(encoded_length)
     }
 
     pub fn encode_resource_record(
@@ -111,13 +136,28 @@ impl FrameCoder {
         // Encode time to live
         buf.put_u32(resource_record.time_to_live)?;
 
-        // Encoding RData length field
-        buf.put_u16(0x04)?;
-
         // Encode RDdata field
-        match resource_record.record_data {
-            ResourceRecordData::ARecord(record) => buf.put_u32(record),
-            _ => Err(NetworkBufferError::InvalidPacket),
+        match &resource_record.record_data {
+            ResourceRecordData::ARecord(record) => {
+                buf.put_u16(4)?;
+                buf.put_u32(*record)
+            }
+            ResourceRecordData::AAAARecord(record) => {
+                buf.put_u16(16)?;
+                buf.put_u128(*record)
+            }
+            ResourceRecordData::CName(domain) => {
+                let rd_length = FrameCoder::calculate_domain_length(&domain);
+
+                buf.put_u16(0)?;
+                let encoded_length = self.encode_domain(&domain, buf)?;
+
+                if encoded_length != rd_length {
+                    return Err(NetworkBufferError::InvalidPacket);
+                }
+
+                Ok(())
+            }
         }
     }
 
@@ -582,6 +622,73 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_resource_record_AAARecord() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let resource_record_bytes: [u8; 42] = [
+            3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 28, 0, 1, 0,
+            0, 0, 255, 0, 16, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+        ];
+
+        buf._put_bytes(&resource_record_bytes).unwrap();
+
+        let resource_record = coder.decode_resource_record(&mut buf).unwrap();
+
+        assert_eq!(resource_record.domain, String::from(".www.google.com"));
+        assert!(matches!(
+            resource_record.record_type,
+            ResourceRecordType::AAAARecord
+        ));
+
+        assert!(matches!(
+            resource_record.class,
+            ResourceRecordClass::InternetAddress
+        ));
+
+        assert_eq!(resource_record.time_to_live, 255);
+        match resource_record.record_data {
+            ResourceRecordData::AAAARecord(value) => {
+                assert_eq!(value, 0x08080808080808080808080808080808)
+            }
+            _ => panic!("Bad resource record"),
+        }
+    }
+
+    #[test]
+    fn test_decode_resource_record_CNAME() {
+        let mut coder = FrameCoder::new();
+        let mut buf = NetworkBuffer::new();
+
+        let resource_record_bytes: [u8; 42] = [
+            3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 5, 0, 1, 0,
+            0, 0, 255, 0, 16, 3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109,
+            0,
+        ];
+
+        buf._put_bytes(&resource_record_bytes).unwrap();
+
+        let resource_record = coder.decode_resource_record(&mut buf).unwrap();
+
+        assert_eq!(resource_record.domain, String::from(".www.google.com"));
+        assert!(matches!(
+            resource_record.record_type,
+            ResourceRecordType::CNameRecord
+        ));
+
+        assert!(matches!(
+            resource_record.class,
+            ResourceRecordClass::InternetAddress
+        ));
+
+        assert_eq!(resource_record.time_to_live, 255);
+        match resource_record.record_data {
+            ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
+            _ => panic!("Bad resource record"),
+        }
+    }
+
+    #[test]
     fn test_decode_pointer_domain() {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
@@ -599,5 +706,16 @@ mod tests {
         let pointer = coder.decode_domain(&mut buf).unwrap();
 
         assert_eq!(original, pointer);
+    }
+
+    #[test]
+    fn test_calculate_domain_length() {
+        let domain = ".www.google.com";
+
+        assert_eq!(FrameCoder::calculate_domain_length(domain), 16);
+
+        let domain = ".dank.com";
+
+        assert_eq!(FrameCoder::calculate_domain_length(domain), 10);
     }
 }

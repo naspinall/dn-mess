@@ -66,20 +66,20 @@ impl NetworkBuffer {
             return Err(NetworkBufferError::BufferFullError);
         }
 
-        self.buf[self.write_cursor + 1]  = (value >> 112) as u8;
-        self.buf[self.write_cursor + 2]  = (value >> 104) as u8;
-        self.buf[self.write_cursor + 3]  = (value >> 96) as u8;
-        self.buf[self.write_cursor + 4]  = (value >> 88) as u8;
-        self.buf[self.write_cursor + 5]  = (value >> 80) as u8;
-        self.buf[self.write_cursor + 6]  = (value >> 72) as u8;
-        self.buf[self.write_cursor + 7]  = (value >> 64) as u8;
-        self.buf[self.write_cursor + 8]  = (value >> 56) as u8;
-        self.buf[self.write_cursor + 9]  = (value >> 48) as u8;
-        self.buf[self.write_cursor + 10] = (value  >> 40) as u8;
-        self.buf[self.write_cursor + 11] = (value  >> 32) as u8;
-        self.buf[self.write_cursor + 12] = (value  >> 24) as u8;
-        self.buf[self.write_cursor + 13] = (value  >> 16) as u8;
-        self.buf[self.write_cursor + 14] = (value  >> 8) as u8;
+        self.buf[self.write_cursor + 1] = (value >> 112) as u8;
+        self.buf[self.write_cursor + 2] = (value >> 104) as u8;
+        self.buf[self.write_cursor + 3] = (value >> 96) as u8;
+        self.buf[self.write_cursor + 4] = (value >> 88) as u8;
+        self.buf[self.write_cursor + 5] = (value >> 80) as u8;
+        self.buf[self.write_cursor + 6] = (value >> 72) as u8;
+        self.buf[self.write_cursor + 7] = (value >> 64) as u8;
+        self.buf[self.write_cursor + 8] = (value >> 56) as u8;
+        self.buf[self.write_cursor + 9] = (value >> 48) as u8;
+        self.buf[self.write_cursor + 10] = (value >> 40) as u8;
+        self.buf[self.write_cursor + 11] = (value >> 32) as u8;
+        self.buf[self.write_cursor + 12] = (value >> 24) as u8;
+        self.buf[self.write_cursor + 13] = (value >> 16) as u8;
+        self.buf[self.write_cursor + 14] = (value >> 8) as u8;
         self.buf[self.write_cursor + 15] = (value & 0x00FF) as u8;
 
         self.write_cursor += 16;
