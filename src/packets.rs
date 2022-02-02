@@ -49,14 +49,14 @@ pub enum ResponseCode {
 }
 
 #[derive(Debug, Clone)]
-pub struct QuestionPacket {
+pub struct Question {
     pub domain: String,
     pub question_type: ResourceRecordType,
     pub class: QuestionClass,
 }
 
 #[derive(Debug, Clone)]
-pub struct ResourceRecordPacket {
+pub struct ResourceRecord {
     pub domain: String,
     pub record_type: ResourceRecordType,
     pub class: ResourceRecordClass,
@@ -75,41 +75,13 @@ pub struct Frame {
     pub recursion_available: bool,
     pub response_code: ResponseCode,
 
-    pub question_count: u16,
-    pub answer_count: u16,
-    pub name_server_count: u16,
-    pub additional_records_count: u16,
-
-    pub questions: Vec<QuestionPacket>,
-    pub answers: Vec<ResourceRecordPacket>,
+    pub questions: Vec<Question>,
+    pub answers: Vec<ResourceRecord>,
+    pub name_servers: Vec<Question>,
+    pub additional_records: Vec<ResourceRecord>,
 }
 
 impl Frame {
-    pub fn new(id: u16, packet_type: PacketType) -> Frame {
-        Frame {
-            id,
-            packet_type,
-            // Only support standard queries
-            op_code: 0,
-            // These options will be set elsewhere
-            authoritative_answer: false,
-            truncation: false,
-            recursion_desired: true,
-            recursion_available: false,
-            // Default to no error
-            response_code: ResponseCode::None,
-
-            // Zero out
-            question_count: 0,
-            answer_count: 0,
-            name_server_count: 0,
-            additional_records_count: 0,
-
-            questions: vec![],
-            answers: vec![],
-        }
-    }
-
     fn response_frame(&self, response_type: PacketType, id: u16) -> Frame {
         Frame {
             id,
@@ -124,14 +96,10 @@ impl Frame {
             // Default to no error
             response_code: ResponseCode::None,
 
-            // Zero out
-            question_count: 0,
-            answer_count: 0,
-            name_server_count: 0,
-            additional_records_count: 0,
-
             questions: vec![],
             answers: vec![],
+            name_servers: vec![],
+            additional_records: vec![],
         }
     }
 
@@ -143,13 +111,11 @@ impl Frame {
         self.response_frame(PacketType::Response, self.id)
     }
 
-    pub fn add_question(&mut self, question: &QuestionPacket) {
+    pub fn add_question(&mut self, question: &Question) {
         self.questions.push(question.clone());
-        self.question_count += 1;
     }
 
-    pub fn add_answer(&mut self, answer: &ResourceRecordPacket) {
+    pub fn add_answer(&mut self, answer: &ResourceRecord) {
         self.answers.push(answer.clone());
-        self.answer_count += 1;
     }
 }

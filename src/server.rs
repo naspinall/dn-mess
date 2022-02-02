@@ -1,19 +1,17 @@
 use std::{net::SocketAddr, sync::Arc, sync::Mutex};
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
 
 mod cache;
 
 use crate::{
     client::Client,
     connection::Connection,
-    packets::{Frame, ResourceRecordPacket},
+    packets::{Frame, ResourceRecord},
 };
 
 use self::cache::HashCache;
 
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
-
 type Cache = Arc<Mutex<HashCache>>;
 pub struct Server {}
 
@@ -52,7 +50,7 @@ impl Server {
                     Ok(response) => response,
                 };
 
-                // Send response down response channel
+                // Write response to socket
                 Connection::new()
                     .write_frame(&socket, &response, &addr)
                     .await;
@@ -84,7 +82,7 @@ impl Server {
         Ok(response)
     }
 
-    pub async fn recurse_query(request: &Frame) -> ServerResult<Vec<ResourceRecordPacket>> {
+    pub async fn recurse_query(request: &Frame) -> ServerResult<Vec<ResourceRecord>> {
         let mut client = Client::dial(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
 
         let response = client.send(request).await?;
