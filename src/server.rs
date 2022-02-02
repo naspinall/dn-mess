@@ -1,3 +1,4 @@
+use log::info;
 use rand::{prelude::ThreadRng, Rng};
 use std::{net::SocketAddr, vec};
 
@@ -32,6 +33,8 @@ impl Server {
         loop {
             let (addr, request) = listener.read_frame().await?;
 
+            Server::log_frame(&request, &addr);
+
             let mut answers: Vec<ResourceRecordPacket> = vec![];
 
             // Copy of the questions we can mutate
@@ -60,7 +63,7 @@ impl Server {
                 let mut recurse_request =
                     Frame::new(self.rng.gen(), crate::packets::PacketType::Query);
 
-                // Add all remaning questions to the recursion packet
+                // Add all remaining questions to the recursion packet
                 for question in questions.iter() {
                     recurse_request.add_question(question)
                 }
@@ -91,6 +94,8 @@ impl Server {
                 response.add_answer(answer);
             }
 
+            Server::log_frame(&response, &addr);
+
             listener.write_frame(&response, &addr).await?;
         }
     }
@@ -104,5 +109,27 @@ impl Server {
         let response = client.send(request).await?;
 
         Ok(response.answers)
+    }
+
+    pub fn log_frame(frame: &Frame, addr: &SocketAddr) -> Option<Box<dyn std::error::Error>> {
+        let mut log = format!("{:?} {} {}", frame.packet_type, addr, frame.id);
+
+        for question in frame.questions.iter() {
+            log.push_str(format!(" {:?} {}", question.question_type, question.domain).as_str());
+        }
+
+        for answer in frame.answers.iter() {
+            log.push_str(
+                format!(
+                    " {:?} {} {} {:?}",
+                    answer.record_type, answer.domain, answer.time_to_live, answer.record_data
+                )
+                .as_str(),
+            );
+        }
+
+        info!("{}", log);
+
+        return None;
     }
 }

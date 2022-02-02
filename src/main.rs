@@ -10,6 +10,10 @@ mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Start the logger
+    env_logger::init();
+
+    // Start the server
     let mut server = Server::new();
     server.listen(8080).await?;
     Ok(())
