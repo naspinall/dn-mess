@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, sync::Mutex};
+use std::{net::SocketAddr, sync::Arc, sync::Mutex};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
@@ -29,31 +29,20 @@ impl Server {
         // Wrap socket in reference count for use in both async moves
         let socket = Arc::new(UdpSocket::bind(listen_addr).await?);
 
-        // Create channel to send responses
-        let (tx, mut rx) = mpsc::channel(32);
-
-        let (read_socket, write_socket) = (socket.clone(), socket.clone());
-
         // Setup access to hash map
         let cache: Cache = Arc::new(Mutex::new(HashCache::new()));
 
-        // Spawn receiver to send values down UDP socket
-        tokio::spawn(async move {
-            while let Some((frame, addr)) = rx.recv().await {
-                Connection::new()
-                    .write_frame(&write_socket, &frame, &addr)
-                    .await;
-            }
-        });
-
         loop {
-            // Wait for an incoming frame
-            let (addr, request) = Connection::new().read_frame(&read_socket).await?;
+            // Get a reference counted copy of the sockets
+            let socket = socket.clone();
 
+            // Wait for an incoming frame
+            let (addr, request) = Connection::new().read_frame(&socket).await?;
+
+            // Get a reference counted version of the cache
             let cache = cache.clone();
 
-            let response_tx = tx.clone();
-
+            // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
                 // Handle the request, log any errors
                 let response = match Server::handle(&request, cache).await {
@@ -64,7 +53,9 @@ impl Server {
                 };
 
                 // Send response down response channel
-                response_tx.send((response, addr)).await;
+                Connection::new()
+                    .write_frame(&socket, &response, &addr)
+                    .await;
             });
         }
     }
