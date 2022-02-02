@@ -89,8 +89,6 @@ impl Server {
 
         let response = client.send(request).await?;
 
-        println!("{:?}", response);
-
         Ok(response.answers)
     }
 }
