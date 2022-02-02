@@ -61,7 +61,7 @@ pub struct ResourceRecord {
     pub record_type: ResourceRecordType,
     pub class: ResourceRecordClass,
     pub time_to_live: u32,
-    pub record_data: ResourceRecordData,
+    pub data: ResourceRecordData,
 }
 
 #[derive(Debug, Clone)]

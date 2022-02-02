@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::packets::{ResourceRecordData, ResourceRecordType};
+use crate::packets::{
+    Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
+};
 
 pub struct HashCache {
     map: HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>,
@@ -34,5 +36,42 @@ impl HashCache {
             (record_type.clone(), domain.to_string()),
             (data.clone(), time_to_live),
         );
+    }
+
+    pub fn put_resource_records(&mut self, resource_records: &Vec<ResourceRecord>) {
+        resource_records.iter().for_each(|record| {
+            self.put(
+                &record.record_type,
+                &record.domain,
+                &record.data,
+                record.time_to_live,
+            )
+        })
+    }
+
+    pub fn get_intersection(
+        &self,
+        questions: &Vec<Question>,
+    ) -> (Vec<ResourceRecord>, Vec<Question>) {
+        // Return vectors
+        let mut excluded_questions = vec![];
+        let mut answers = vec![];
+
+        for question in questions.iter() {
+            match self.get(&question.question_type, &question.domain) {
+                // Found so we'll add to the answers vector
+                Some((data, time_to_live)) => answers.push(ResourceRecord {
+                    domain: question.domain.clone(),
+                    data,
+                    time_to_live,
+                    record_type: question.question_type.clone(),
+                    class: ResourceRecordClass::InternetAddress,
+                }),
+                // Not found so add to vector
+                None => excluded_questions.push(question.clone()),
+            }
+        }
+
+        (answers, excluded_questions)
     }
 }

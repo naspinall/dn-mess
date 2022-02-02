@@ -137,7 +137,7 @@ impl FrameCoder {
         buf.put_u32(resource_record.time_to_live)?;
 
         // Encode RDdata field
-        match &resource_record.record_data {
+        match &resource_record.data {
             ResourceRecordData::ARecord(record) => {
                 buf.put_u16(4)?;
                 buf.put_u32(*record)
@@ -364,7 +364,7 @@ impl FrameCoder {
         Ok(ResourceRecord {
             domain,
             record_type,
-            record_data,
+            data: record_data,
             class,
             time_to_live,
         })
@@ -604,7 +604,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::ARecord(value) => assert_eq!(value, 0x08080808),
             _ => panic!("Bad resource record"),
         }
@@ -636,7 +636,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::AAAARecord(value) => {
                 assert_eq!(value, 0x08080808080808080808080808080808)
             }
@@ -671,7 +671,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
             _ => panic!("Bad resource record"),
         }

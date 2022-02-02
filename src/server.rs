@@ -1,5 +1,5 @@
-use std::{net::SocketAddr, sync::Arc, sync::Mutex};
-use tokio::net::UdpSocket;
+use std::{net::SocketAddr, sync::Arc};
+use tokio::{net::UdpSocket, sync::Mutex};
 
 mod cache;
 
@@ -43,7 +43,7 @@ impl Server {
             // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
                 // Handle the request, log any errors
-                let response = match Server::handle(&request, cache).await {
+                let response = match Server::handle(&request, &cache).await {
                     Err(error) => {
                         panic!("{}", error)
                     }
@@ -58,24 +58,38 @@ impl Server {
         }
     }
 
-    pub async fn handle(request: &Frame, cache: Cache) -> ServerResult<Frame> {
+    pub async fn handle(request: &Frame, cache: &Cache) -> ServerResult<Frame> {
         // Create response
         let mut response = request.build_response();
 
         let mut recurse_request = request.build_query(request.id);
 
-        for question in request.questions.iter() {
+        // Lock the cache
+        let mut cache = cache.lock().await;
+
+        let (cache_answers, remaining_questions) = cache.get_intersection(&request.questions);
+
+        for question in remaining_questions.iter() {
             recurse_request.add_question(question);
         }
 
-        // Recurse to get answers
-        let answers = Server::recurse_query(&recurse_request).await?;
+        if request.recursion_desired && remaining_questions.len() > 0 {
+            // Recurse to get answers
+            let upstream_answers = Server::recurse_query(&recurse_request).await?;
+
+            for answer in upstream_answers.iter() {
+                response.add_answer(answer);
+            }
+
+            // Add upstream answers to the cache
+            cache.put_resource_records(&upstream_answers);
+        }
 
         for question in request.questions.iter() {
             response.add_question(question);
         }
 
-        for answer in answers.iter() {
+        for answer in cache_answers.iter() {
             response.add_answer(answer);
         }
 
