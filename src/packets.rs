@@ -108,7 +108,10 @@ impl Frame {
     }
 
     pub fn build_response(&self) -> Frame {
-        self.response_frame(PacketType::Response, self.id)
+        // Clone self, set type to response
+        let response: Frame = self.clone();
+        response.packet_type = PacketType::Response;
+        response
     }
 
     pub fn add_question(&mut self, question: &Question) {
