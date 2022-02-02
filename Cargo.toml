@@ -9,3 +9,5 @@ edition = "2021"
 # TODO remove features that aren't required here
 tokio = { version = "1", features = ["full"] }
 rand = { version = "*" }
+log = "0.4"
+env_logger = "0.9"

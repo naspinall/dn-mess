@@ -103,4 +103,26 @@ impl Server {
 
         Ok(response.answers)
     }
+
+    pub fn log_frame(frame: &Frame, addr: &SocketAddr) -> Option<Box<dyn std::error::Error>> {
+        let mut log = format!("{:?} {} {}", frame.packet_type, addr, frame.id);
+
+        for question in frame.questions.iter() {
+            log.push_str(format!(" {:?} {}", question.question_type, question.domain).as_str());
+        }
+
+        for answer in frame.answers.iter() {
+            log.push_str(
+                format!(
+                    " {:?} {} {} {:?}",
+                    answer.record_type, answer.domain, answer.time_to_live, answer.record_data
+                )
+                .as_str(),
+            );
+        }
+
+        info!("{}", log);
+
+        return None;
+    }
 }
