@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
-    Frame, PacketType, QuestionClass, QuestionPacket, ResourceRecordClass, ResourceRecordData,
-    ResourceRecordPacket, ResourceRecordType, ResponseCode,
+    Frame, PacketType, Question, QuestionClass, ResourceRecord, ResourceRecordClass,
+    ResourceRecordData, ResourceRecordType, ResponseCode,
 };
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
@@ -112,7 +112,7 @@ impl FrameCoder {
 
     pub fn encode_resource_record(
         &mut self,
-        resource_record: &ResourceRecordPacket,
+        resource_record: &ResourceRecord,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
@@ -137,7 +137,7 @@ impl FrameCoder {
         buf.put_u32(resource_record.time_to_live)?;
 
         // Encode RDdata field
-        match &resource_record.record_data {
+        match &resource_record.data {
             ResourceRecordData::ARecord(record) => {
                 buf.put_u16(4)?;
                 buf.put_u32(*record)
@@ -198,24 +198,22 @@ impl FrameCoder {
 
         buf.put_u8(options)?;
 
-        // Ignore other fields for now
-
         // Encode Question Count
-        buf.put_u16(frame.question_count)?;
+        buf.put_u16(frame.questions.len() as u16)?;
 
         // Encode Answer Count
-        buf.put_u16(frame.answer_count)?;
+        buf.put_u16(frame.answers.len() as u16)?;
 
         // Encode Name Server Count
-        buf.put_u16(frame.name_server_count)?;
+        buf.put_u16(frame.name_servers.len() as u16)?;
         // Encode Additional Records Count
 
-        buf.put_u16(frame.additional_records_count)
+        buf.put_u16(frame.additional_records.len() as u16)
     }
 
     pub fn encode_question(
         &mut self,
-        question: &QuestionPacket,
+        question: &Question,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
@@ -237,7 +235,7 @@ impl FrameCoder {
         buf.put_u16(1)
     }
 
-    pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<QuestionPacket> {
+    pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Question> {
         // Decode the domain
         let domain = self.decode_domain(buf)?;
 
@@ -256,7 +254,7 @@ impl FrameCoder {
             _ => QuestionClass::Unimplemented,
         };
 
-        Ok(QuestionPacket {
+        Ok(Question {
             domain,
             question_type,
             class,
@@ -346,7 +344,7 @@ impl FrameCoder {
     pub fn decode_resource_record(
         &mut self,
         buf: &mut NetworkBuffer,
-    ) -> CodingResult<ResourceRecordPacket> {
+    ) -> CodingResult<ResourceRecord> {
         // Decoding domain name record refers too
         let domain = self.decode_domain(buf)?;
         let record_type = self.decode_type(buf)?;
@@ -363,10 +361,10 @@ impl FrameCoder {
             _ => return Err(NetworkBufferError::InvalidPacket),
         };
 
-        Ok(ResourceRecordPacket {
+        Ok(ResourceRecord {
             domain,
             record_type,
-            record_data,
+            data: record_data,
             class,
             time_to_live,
         })
@@ -421,11 +419,11 @@ impl FrameCoder {
 
         let question_count = buf.get_u16()?;
         let answer_count = buf.get_u16()?;
-        let name_server_count = buf.get_u16()?;
-        let additional_records_count = buf.get_u16()?;
+        let _name_server_count = buf.get_u16()?;
+        let _additional_records_count = buf.get_u16()?;
 
-        let mut questions: Vec<QuestionPacket> = Vec::new();
-        let mut answers: Vec<ResourceRecordPacket> = Vec::new();
+        let mut questions: Vec<Question> = Vec::new();
+        let mut answers: Vec<ResourceRecord> = Vec::new();
 
         // Encode question
         for _ in 0..question_count {
@@ -450,12 +448,10 @@ impl FrameCoder {
             recursion_available,
             response_code,
 
-            question_count,
-            answer_count,
-            name_server_count,
-            additional_records_count,
             questions,
             answers,
+            name_servers: vec![],
+            additional_records: vec![],
         })
     }
 }
@@ -531,11 +527,6 @@ mod tests {
         assert!(frame.recursion_desired);
         assert!(frame.recursion_available);
         assert!(matches!(frame.response_code, ResponseCode::NotImplemented));
-
-        assert_eq!(frame.question_count, 0);
-        assert_eq!(frame.answer_count, 0);
-        assert_eq!(frame.name_server_count, 0);
-        assert_eq!(frame.additional_records_count, 0);
     }
 
     #[test]
@@ -552,17 +543,15 @@ mod tests {
             recursion_desired: true,
             recursion_available: true,
             response_code: ResponseCode::NotImplemented,
-            question_count: 1,
-            answer_count: 2,
-            name_server_count: 3,
-            additional_records_count: 65297,
-            questions: Vec::new(),
-            answers: Vec::new(),
+            questions: vec![],
+            answers: vec![],
+            additional_records: vec![],
+            name_servers: vec![],
         };
 
         coder.encode_frame(&frame, &mut buf).unwrap();
 
-        let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 1, 0, 2, 0, 3, 0xFF, 0x11];
+        let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 0, 0, 0, 0, 0, 0, 0];
 
         assert_eq!(expected_bytes, buf.buf[..12]);
     }
@@ -615,7 +604,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::ARecord(value) => assert_eq!(value, 0x08080808),
             _ => panic!("Bad resource record"),
         }
@@ -647,7 +636,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::AAAARecord(value) => {
                 assert_eq!(value, 0x08080808080808080808080808080808)
             }
@@ -682,7 +671,7 @@ mod tests {
         ));
 
         assert_eq!(resource_record.time_to_live, 255);
-        match resource_record.record_data {
+        match resource_record.data {
             ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
             _ => panic!("Bad resource record"),
         }

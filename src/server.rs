@@ -1,18 +1,17 @@
-use std::{net::SocketAddr, sync::Arc, sync::Mutex};
-use tokio::net::UdpSocket;
+use std::{net::SocketAddr, sync::Arc};
+use tokio::{net::UdpSocket, sync::Mutex};
 
 mod cache;
 
 use crate::{
     client::Client,
     connection::Connection,
-    packets::{Frame, ResourceRecordPacket},
+    packets::{Frame, ResourceRecord},
 };
 
 use self::cache::HashCache;
 
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
-
 type Cache = Arc<Mutex<HashCache>>;
 pub struct Server {}
 
@@ -24,73 +23,84 @@ impl Server {
     pub async fn listen(self, port: u16) -> ServerResult<()> {
         // Listen on given port
         let listen_addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listen_socket = UdpSocket::bind(listen_addr).await?;
+
+        // Wrap socket in reference count for use in both async moves
+        let socket = Arc::new(UdpSocket::bind(listen_addr).await?);
 
         // Setup access to hash map
         let cache: Cache = Arc::new(Mutex::new(HashCache::new()));
 
         loop {
-            // Wait for an incoming frame
-            let (addr, request) = Connection::new().read_frame(&listen_socket).await?;
+            // Get a reference counted copy of the sockets
+            let socket = socket.clone();
 
+            // Wait for an incoming frame
+            let (addr, request) = Connection::new().read_frame(&socket).await?;
+
+            // Get a reference counted version of the cache
             let cache = cache.clone();
 
+            // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
-                // Perform any required
-
                 // Handle the request, log any errors
-                match Server::handle(request, addr, cache).await {
-                    Err(error) => {}
-                    Ok(request) => {}
+                let response = match Server::handle(&request, &cache).await {
+                    Err(error) => {
+                        panic!("{}", error)
+                    }
+                    Ok(response) => response,
                 };
+
+                // Write response to socket
+                Connection::new()
+                    .write_frame(&socket, &response, &addr)
+                    .await;
             });
         }
     }
 
-    pub async fn handle(
-        request: Frame,
-        return_addr: SocketAddr,
-        cache: Cache,
-    ) -> ServerResult<Frame> {
+    pub async fn handle(request: &Frame, cache: &Cache) -> ServerResult<Frame> {
         // Create response
         let mut response = request.build_response();
 
-        // Recurse to get answers
-        let answers = Server::recurse_query(&request).await?;
+        let mut recurse_request = request.build_query(request.id);
 
-        // Set answers
-        response.answers = answers;
+        // Lock the cache
+        let mut cache = cache.lock().await;
+
+        let (cache_answers, remaining_questions) = cache.get_intersection(&request.questions);
+
+        for question in remaining_questions.iter() {
+            recurse_request.add_question(question);
+        }
+
+        if request.recursion_desired && remaining_questions.len() > 0 {
+            // Recurse to get answers
+            let upstream_answers = Server::recurse_query(&recurse_request).await?;
+
+            for answer in upstream_answers.iter() {
+                response.add_answer(answer);
+            }
+
+            // Add upstream answers to the cache
+            cache.put_resource_records(&upstream_answers);
+        }
+
+        for question in request.questions.iter() {
+            response.add_question(question);
+        }
+
+        for answer in cache_answers.iter() {
+            response.add_answer(answer);
+        }
 
         Ok(response)
     }
 
-    pub async fn recurse_query(request: &Frame) -> ServerResult<Vec<ResourceRecordPacket>> {
+    pub async fn recurse_query(request: &Frame) -> ServerResult<Vec<ResourceRecord>> {
         let mut client = Client::dial(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
 
         let response = client.send(request).await?;
 
         Ok(response.answers)
-    }
-
-    pub fn log_frame(frame: &Frame, addr: &SocketAddr) -> Option<Box<dyn std::error::Error>> {
-        let mut log = format!("{:?} {} {}", frame.packet_type, addr, frame.id);
-
-        for question in frame.questions.iter() {
-            log.push_str(format!(" {:?} {}", question.question_type, question.domain).as_str());
-        }
-
-        for answer in frame.answers.iter() {
-            log.push_str(
-                format!(
-                    " {:?} {} {} {:?}",
-                    answer.record_type, answer.domain, answer.time_to_live, answer.record_data
-                )
-                .as_str(),
-            );
-        }
-
-        info!("{}", log);
-
-        return None;
     }
 }
