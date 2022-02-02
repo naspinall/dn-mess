@@ -64,7 +64,7 @@ pub struct ResourceRecordPacket {
     pub record_data: ResourceRecordData,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Frame {
     pub id: u16,
     pub packet_type: PacketType,
@@ -140,7 +140,10 @@ impl Frame {
     }
 
     pub fn build_response(&self) -> Frame {
-        self.response_frame(PacketType::Response, self.id)
+        // Clone self, set type to response
+        let response: Frame = self.clone();
+        response.packet_type = PacketType::Response;
+        response
     }
 
     pub fn add_question(&mut self, question: &QuestionPacket) {
