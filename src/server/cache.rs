@@ -1,55 +1,58 @@
 use std::collections::HashMap;
 
+use tokio::sync::Mutex;
+
 use crate::packets::{
     Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
 pub struct HashCache {
-    map: HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>,
+    map: Mutex<HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>>
 }
 
 impl HashCache {
     pub fn new() -> HashCache {
         HashCache {
-            map: HashMap::new(),
+            map: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn get(
+    pub async fn get(
         &self,
         record_type: &ResourceRecordType,
         domain: &str,
     ) -> Option<(ResourceRecordData, u32)> {
-        let data = self.map.get(&(record_type.clone(), domain.to_string()))?;
+        let map = self.map.lock().await;
+        let data = map.get(&(record_type.clone(), domain.to_string()))?;
 
         Some(data.clone())
     }
 
-    pub fn put(
-        &mut self,
+    pub async fn put(
+        &self,
         record_type: &ResourceRecordType,
         domain: &str,
         data: &ResourceRecordData,
         time_to_live: u32,
     ) {
-        self.map.insert(
+        let mut map = self.map.lock().await;
+        map.insert(
             (record_type.clone(), domain.to_string()),
             (data.clone(), time_to_live),
         );
     }
 
-    pub fn put_resource_records(&mut self, resource_records: &Vec<ResourceRecord>) {
+    pub async fn put_resource_records(&self, resource_records: &Vec<ResourceRecord>) {
+        let mut map = self.map.lock().await;
         resource_records.iter().for_each(|record| {
-            self.put(
-                &record.record_type,
-                &record.domain,
-                &record.data,
-                record.time_to_live,
-            )
+            map.insert(
+                (record.record_type.clone(), record.domain.to_string()),
+                (record.data.clone(), record.time_to_live),
+            );
         })
     }
 
-    pub fn get_intersection(
+    pub async fn get_intersection(
         &self,
         questions: &Vec<Question>,
     ) -> (Vec<ResourceRecord>, Vec<Question>) {
@@ -58,7 +61,7 @@ impl HashCache {
         let mut answers = vec![];
 
         for question in questions.iter() {
-            match self.get(&question.question_type, &question.domain) {
+            match self.get(&question.question_type, &question.domain).await {
                 // Found so we'll add to the answers vector
                 Some((data, time_to_live)) => answers.push(ResourceRecord {
                     domain: question.domain.clone(),

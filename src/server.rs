@@ -12,7 +12,7 @@ use crate::{
 use self::cache::HashCache;
 
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
-type Cache = Arc<Mutex<HashCache>>;
+type Cache = Arc<HashCache>;
 pub struct Server {}
 
 impl Server {
@@ -28,7 +28,7 @@ impl Server {
         let socket = Arc::new(UdpSocket::bind(listen_addr).await?);
 
         // Setup access to hash map
-        let cache: Cache = Arc::new(Mutex::new(HashCache::new()));
+        let cache: Cache = Arc::new(HashCache::new());
 
         loop {
             // Get a reference counted copy of the sockets
@@ -64,10 +64,7 @@ impl Server {
 
         let mut recurse_request = request.build_query(request.id);
 
-        // Lock the cache
-        let mut cache = cache.lock().await;
-
-        let (cache_answers, remaining_questions) = cache.get_intersection(&request.questions);
+        let (cache_answers, remaining_questions) = cache.get_intersection(&request.questions).await;
 
         for question in remaining_questions.iter() {
             recurse_request.add_question(question);
@@ -82,7 +79,7 @@ impl Server {
             }
 
             // Add upstream answers to the cache
-            cache.put_resource_records(&upstream_answers);
+            cache.put_resource_records(&upstream_answers).await;
         }
 
         for question in request.questions.iter() {
