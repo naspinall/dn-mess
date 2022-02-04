@@ -1,9 +1,6 @@
 use log::error;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, Mutex},
-};
+use tokio::{net::UdpSocket, sync::mpsc};
 
 mod cache;
 

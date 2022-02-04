@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::vec;
 
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
@@ -278,14 +279,71 @@ impl FrameCoder {
         Ok(label)
     }
 
+    pub fn decode_resource_record_data(
+        &mut self,
+        buf: &mut NetworkBuffer,
+        data_length: u16,
+    ) -> CodingResult<String> {
+        let mut decoded_domains = vec![];
+        let mut decoded_indexes = vec![];
+
+        let mut data = String::new();
+
+        for _ in 0..data_length {
+            let label_length = buf.get_u8()? as usize;
+
+            let starting_index = buf.read_cursor - 1;
+
+            if label_length & 0xC0 > 0 {
+                // TODO two byte offset
+                let pointer_location = buf.get_u8()? as usize;
+
+                let decoded_domain = match self.decoded_domains.get(&pointer_location) {
+                    Some(domain) => domain,
+                    None => return Err(NetworkBufferError::CompressionError),
+                };
+
+                return Ok(decoded_domain.to_string());
+            }
+
+            // Decode current label
+            let label = self.decode_domain_label(label_length, buf)?;
+
+            // Add separator
+            data.push('.');
+
+            // Add the label to the total domain
+            data.push_str(&label);
+
+            // Add to list of decoded domains
+            decoded_domains.push(label.clone());
+            decoded_indexes.push(starting_index);
+        }
+
+        self.save_decoded_domains(&decoded_domains, &decoded_indexes);
+
+        return Ok(data);
+    }
+
+    pub fn save_decoded_domains(&mut self, domains: &[String], indexes: &[usize]) {
+        // Adding all domains decoded, indexes in reverse order
+        for (domain_index, pointer_index) in (0..domains.len()).zip(indexes.iter()) {
+            let full_domain = domains[domain_index..].join(".");
+            self.decoded_domains.insert(*pointer_index, full_domain);
+        }
+    }
+
     pub fn decode_domain(&mut self, buf: &mut NetworkBuffer) -> CodingResult<String> {
         let mut domain = String::new();
 
-        let starting_index = buf.read_cursor;
-
         let mut label_length = buf.get_u8()? as usize;
 
+        let mut decoded_domains = vec![];
+        let mut decoded_indexes = vec![];
+
         while label_length != 0x00 {
+            let starting_index = buf.read_cursor - 1;
+
             if label_length & 0xC0 > 0 {
                 // TODO two byte offset
                 let pointer_location = buf.get_u8()? as usize;
@@ -307,11 +365,19 @@ impl FrameCoder {
             // Add the label to the total domain
             domain.push_str(&label);
 
+            // Add to list of decoded domains
+            decoded_domains.push(label.clone());
+            decoded_indexes.push(starting_index);
+
             label_length = buf.get_u8()? as usize;
         }
 
-        // Add to cache
-        self.decoded_domains.insert(starting_index, domain.clone());
+        // Adding all domains decoded, indexes in reverse order
+        for (domain_index, pointer_index) in (0..decoded_domains.len()).zip(decoded_indexes.iter())
+        {
+            let full_domain = decoded_domains[domain_index..].join(".");
+            self.decoded_domains.insert(*pointer_index, full_domain);
+        }
 
         Ok(domain)
     }
@@ -353,11 +419,13 @@ impl FrameCoder {
         let time_to_live = buf.get_u32()?;
 
         // TODO verify data length here
-        let _data_length = buf.get_u16()?;
+        let data_length = buf.get_u16()?;
 
         let record_data = match record_type {
             ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
-            ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_domain(buf)?),
+            ResourceRecordType::CNameRecord => {
+                ResourceRecordData::CName(self.decode_resource_record_data(buf, data_length)?)
+            }
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
             _ => return Err(NetworkBufferError::InvalidPacket),
         };
