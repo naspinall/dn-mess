@@ -1,5 +1,9 @@
+use log::error;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{net::UdpSocket, sync::Mutex};
+use tokio::{
+    net::UdpSocket,
+    sync::{mpsc, Mutex},
+};
 
 mod cache;
 
@@ -13,11 +17,26 @@ use self::cache::HashCache;
 
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
 type Cache = Arc<HashCache>;
-pub struct Server {}
+type FrameHook = fn(&Frame);
+pub struct Server {
+    pre_request_hooks: Vec<FrameHook>,
+    post_request_hooks: Vec<FrameHook>,
+}
 
 impl Server {
     pub fn new() -> Server {
-        Server {}
+        Server {
+            pre_request_hooks: vec![],
+            post_request_hooks: vec![],
+        }
+    }
+
+    pub fn add_pre_request_hook(&mut self, hook: FrameHook) {
+        self.pre_request_hooks.push(hook);
+    }
+
+    pub fn add_post_request_hook(&mut self, hook: FrameHook) {
+        self.post_request_hooks.push(hook);
     }
 
     pub async fn listen(self, port: u16) -> ServerResult<()> {
@@ -27,8 +46,29 @@ impl Server {
         // Wrap socket in reference count for use in both async moves
         let socket = Arc::new(UdpSocket::bind(listen_addr).await?);
 
+        let write_sock = socket.clone();
+
+        let (response_rx, mut response_tx) = mpsc::channel(1024);
+
         // Setup access to hash map
         let cache: Cache = Arc::new(HashCache::new());
+
+        tokio::spawn(async move {
+            while let Some((response, addr)) = response_tx.recv().await {
+                self.post_request_hooks
+                    .iter()
+                    .for_each(|func| func(&response));
+
+                // Write response to socket
+                if let Some(err) = Connection::new()
+                    .write_frame(&write_sock, &response, &addr)
+                    .await
+                    .err()
+                {
+                    error!("Error writing response {}: {}", response.id, err);
+                }
+            }
+        });
 
         loop {
             // Get a reference counted copy of the sockets
@@ -40,20 +80,28 @@ impl Server {
             // Get a reference counted version of the cache
             let cache = cache.clone();
 
+            let rx = response_rx.clone();
+
+            self.pre_request_hooks
+                .iter()
+                .for_each(|func| func(&request));
+
             // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
                 // Handle the request, log any errors
                 let response = match Server::handle(&request, &cache).await {
-                    Err(error) => {
-                        panic!("{}", error)
+                    Err(err) => {
+                        error!("Error handling request {}: {}", request.id, err);
+                        return;
                     }
                     Ok(response) => response,
                 };
 
-                // Write response to socket
-                Connection::new()
-                    .write_frame(&socket, &response, &addr)
-                    .await;
+                let id = response.id;
+
+                if let Some(err) = rx.send((response, addr)).await.err() {
+                    error!("Error sending {} down response channel: {}", id, err);
+                };
             });
         }
     }

@@ -1,3 +1,8 @@
+use std::{
+    fmt,
+    net::{Ipv4Addr, Ipv6Addr},
+};
+
 #[derive(Debug, Clone)]
 pub enum PacketType {
     Query,
@@ -117,5 +122,84 @@ impl Frame {
 
     pub fn add_answer(&mut self, answer: &ResourceRecord) {
         self.answers.push(answer.clone());
+    }
+}
+
+impl fmt::Display for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "id:{} type:{} ", self.id, self.packet_type)?;
+
+        if !self.questions.is_empty() {
+            for question in self.questions.iter() {
+                write!(f, "question -> {}", question)?;
+            }
+        }
+        if !self.answers.is_empty() {
+            for answer in self.answers.iter() {
+                write!(f, "answer -> {}", answer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for PacketType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PacketType::Query => write!(f, "query"),
+            PacketType::Response => write!(f, "response"),
+        }
+    }
+}
+
+impl fmt::Display for ResourceRecordType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResourceRecordType::ARecord => write!(f, "ARecord"),
+            ResourceRecordType::AAAARecord => write!(f, "AAAARecord"),
+            ResourceRecordType::CNameRecord => write!(f, "CNameRecord"),
+            ResourceRecordType::MXRecord => write!(f, "MXRecord"),
+            ResourceRecordType::NSRecord => write!(f, "NSRecord"),
+            ResourceRecordType::PTRRecord => write!(f, "PTRRecord"),
+            ResourceRecordType::SOARecord => write!(f, "SOARecord"),
+            ResourceRecordType::SRVRecord => write!(f, "SRVRecord"),
+            ResourceRecordType::TXTRecord => write!(f, "TXTRecord"),
+            ResourceRecordType::Unimplemented => write!(f, "Unimplemented"),
+        }
+    }
+}
+
+impl fmt::Display for Question {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "domain:{} type:{} ", self.domain, self.question_type)
+    }
+}
+
+impl fmt::Display for ResourceRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "domain:{} type:{} data:{} ",
+            self.domain, &self.record_type, &self.data
+        )
+    }
+}
+
+impl fmt::Display for ResourceRecordData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResourceRecordData::ARecord(value) => write!(
+                f,
+                "ARecord: {}",
+                Ipv4Addr::new(
+                    (*value >> 24) as u8,
+                    (*value >> 16) as u8,
+                    (*value >> 8) as u8,
+                    *value as u8
+                )
+            ),
+            ResourceRecordData::AAAARecord(value) => panic!("OH NO"),
+            ResourceRecordData::CName(value) => write!(f, "CName: {}", value),
+        }
     }
 }

@@ -5,6 +5,7 @@ pub enum NetworkBufferError {
     BufferFullError,
     BufferEmptyError,
     InvalidPacket,
+    CompressionError,
 }
 
 impl std::error::Error for NetworkBufferError {}
@@ -15,6 +16,7 @@ impl fmt::Display for NetworkBufferError {
             NetworkBufferError::BufferEmptyError => write!(f, "Buffer Empty"),
             NetworkBufferError::BufferFullError => write!(f, "Buffer Full"),
             NetworkBufferError::InvalidPacket => write!(f, "Invalid Packet"),
+            NetworkBufferError::CompressionError => write!(f, "Compression Error"),
         }
     }
 }

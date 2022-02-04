@@ -288,13 +288,14 @@ impl FrameCoder {
         while label_length != 0x00 {
             if label_length & 0xC0 > 0 {
                 // TODO two byte offset
-                let pointer_location = buf.get_u8()?;
+                let pointer_location = buf.get_u8()? as usize;
 
-                return Ok(self
-                    .decoded_domains
-                    .get(&(pointer_location as usize))
-                    .unwrap()
-                    .to_string());
+                let decoded_domain = match self.decoded_domains.get(&pointer_location) {
+                    Some(domain) => domain,
+                    None => return Err(NetworkBufferError::CompressionError),
+                };
+
+                return Ok(decoded_domain.to_string());
             }
 
             // Decode current label
