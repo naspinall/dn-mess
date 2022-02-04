@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::vec;
 
+use log::debug;
+
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
 use crate::packets::{
@@ -40,7 +42,7 @@ impl FrameCoder {
         &mut self,
         label: &str,
         buf: &mut NetworkBuffer,
-    ) -> CodingResult<usize> {
+    ) -> CodingResult<()> {
         // Setting label length
         buf.put_u8(label.len() as u8)?;
 
@@ -49,7 +51,7 @@ impl FrameCoder {
             buf.put_u8(character as u8)?;
         }
 
-        Ok(label.len())
+        Ok(())
     }
 
     pub fn write_compressed_domain(
@@ -62,28 +64,14 @@ impl FrameCoder {
         buf.put_u16(compressed_offset)
     }
 
-    fn calculate_domain_length(domain: &str) -> usize {
-        let mut total_length = 0;
-
-        let labels = domain.split(".");
-
-        labels
-            .into_iter()
-            .for_each(|label| total_length += label.len() + 1);
-
-        total_length
-    }
-
-    pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
-        let mut encoded_length = 0;
-
+    pub fn encode_domain(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Check if domain has already been cached
         if let Some(index) = self.get_compressed_domain(domain) {
             // Write the whole compressed domain
             self.write_compressed_domain(*index, buf)?;
 
             // Will only ever be one byte
-            return Ok(1);
+            return Ok(());
         };
 
         // Set domain into hashmap
@@ -98,17 +86,14 @@ impl FrameCoder {
             }
 
             // Add length plus one for length byte
-            encoded_length += self.encode_domain_label(&label.to_string(), buf)? + 1;
+            self.encode_domain_label(&label.to_string(), buf)?;
         }
 
         // Terminating domain name
         buf.put_u8(0x00)?;
 
-        // Add for null byte
-        encoded_length += 1;
-
         // Return length for null byte
-        Ok(encoded_length)
+        Ok(())
     }
 
     pub fn encode_resource_record(
@@ -148,18 +133,58 @@ impl FrameCoder {
                 buf.put_u128(*record)
             }
             ResourceRecordData::CName(domain) => {
-                let rd_length = FrameCoder::calculate_domain_length(&domain);
+                // Where length should be
+                let length_index = buf.write_cursor;
 
+                // Write blank data to where size is
                 buf.put_u16(0)?;
-                let encoded_length = self.encode_domain(&domain, buf)?;
 
-                if encoded_length != rd_length {
-                    return Err(NetworkBufferError::InvalidPacket);
-                }
+                // Write record data, add one for null terminating byte
+                let record_data_length = self.encode_resource_record_data(&domain, buf)? + 1;
+
+                // Add null terminating byte
+                buf.put_u8(0)?;
+
+                // Set size value
+                buf.set_u16(length_index, record_data_length as u16)?;
 
                 Ok(())
             }
         }
+    }
+
+    pub fn encode_resource_record_data(
+        &mut self,
+        domain: &str,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<usize> {
+        let starting_index = buf.write_cursor;
+
+        // Check if domain has already been cached
+        if let Some(index) = self.get_compressed_domain(domain) {
+            // Write the whole compressed domain
+            self.write_compressed_domain(*index, buf)?;
+
+            return Ok(buf.write_cursor - starting_index);
+        };
+
+        // Set domain into hashmap
+        self.set_compressed_domain(domain, buf);
+
+        let labels = domain.split('.');
+
+        for label in labels {
+            // Skip empty strings
+            if label.is_empty() {
+                continue;
+            }
+
+            // Add length plus one for length byte
+            self.encode_domain_label(&label.to_string(), buf)?;
+        }
+
+        // Return length for null byte
+        Ok(buf.write_cursor - starting_index)
     }
 
     pub fn encode_header(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
@@ -287,40 +312,48 @@ impl FrameCoder {
         let mut decoded_domains = vec![];
         let mut decoded_indexes = vec![];
 
-        let mut data = String::new();
+        let starting_index = buf.read_cursor;
 
-        for _ in 0..data_length {
+        while buf.read_cursor < starting_index + data_length as usize {
+            // Beginning of the label
+            let pointer_index = buf.read_cursor;
             let label_length = buf.get_u8()? as usize;
 
-            let starting_index = buf.read_cursor - 1;
-
             if label_length & 0xC0 > 0 {
-                // TODO two byte offset
-                let pointer_location = buf.get_u8()? as usize;
+                // Get u16 from label length and next byte, removing first two bits in the first byte
+                let pointer_location =
+                    (((0x3F & label_length) as u16) << 8 | buf.get_u8()? as u16) as usize;
 
                 let decoded_domain = match self.decoded_domains.get(&pointer_location) {
                     Some(domain) => domain,
                     None => return Err(NetworkBufferError::CompressionError),
                 };
 
-                return Ok(decoded_domain.to_string());
+                decoded_domains.push(decoded_domain.clone());
+                decoded_indexes.push(pointer_index);
+
+                self.save_decoded_domains(&decoded_domains, &decoded_indexes);
+
+                continue;
             }
 
             // Decode current label
             let label = self.decode_domain_label(label_length, buf)?;
 
-            // Add separator
-            data.push('.');
-
-            // Add the label to the total domain
-            data.push_str(&label);
-
             // Add to list of decoded domains
             decoded_domains.push(label.clone());
-            decoded_indexes.push(starting_index);
+            decoded_indexes.push(pointer_index);
         }
 
         self.save_decoded_domains(&decoded_domains, &decoded_indexes);
+
+        // Join all the domains with a period
+        let mut data = decoded_domains.join(".");
+
+        // Ensure starts with a period
+        if !data.starts_with(".") {
+            data.insert(0, '.');
+        }
 
         return Ok(data);
     }
@@ -348,12 +381,17 @@ impl FrameCoder {
                 // TODO two byte offset
                 let pointer_location = buf.get_u8()? as usize;
 
-                let decoded_domain = match self.decoded_domains.get(&pointer_location) {
-                    Some(domain) => domain,
+                let mut decoded_domain = match self.decoded_domains.get(&pointer_location) {
+                    Some(domain) => domain.clone(),
                     None => return Err(NetworkBufferError::CompressionError),
                 };
 
-                return Ok(decoded_domain.to_string());
+                // Ensure starts with a period
+                if !decoded_domain.starts_with(".") {
+                    decoded_domain.insert(0, '.');
+                }
+
+                return Ok(decoded_domain);
             }
 
             // Decode current label
@@ -527,6 +565,7 @@ impl FrameCoder {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -718,10 +757,9 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let resource_record_bytes: [u8; 42] = [
+        let resource_record_bytes = [
             3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109, 0, 0, 5, 0, 1, 0,
-            0, 0, 255, 0, 16, 3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109,
-            0,
+            0, 0, 255, 0, 15, 3, 119, 119, 119, 6, 103, 111, 111, 103, 108, 101, 3, 99, 111, 109,
         ];
 
         buf._put_bytes(&resource_record_bytes).unwrap();
@@ -767,13 +805,30 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_domain_length() {
-        let domain = ".www.google.com";
+    fn test_decode_double_pointer_cname_request() {
+        let mut buf = NetworkBuffer::new();
 
-        assert_eq!(FrameCoder::calculate_domain_length(domain), 16);
+        buf._put_bytes(&[
+            5, 100, 128, 128, 0, 1, 0, 2, 0, 0, 0, 0, 3, 119, 119, 119, 8, 102, 97, 99, 101, 98,
+            111, 111, 107, 3, 99, 111, 109, 0, 0, 1, 0, 1, 192, 12, 0, 5, 0, 1, 0, 0, 9, 125, 0,
+            17, 9, 115, 116, 97, 114, 45, 109, 105, 110, 105, 4, 99, 49, 48, 114, 192, 16, 192, 46,
+            0, 1, 0, 1, 0, 0, 0, 14, 0, 4, 157, 240, 18, 35,
+        ])
+        .unwrap();
 
-        let domain = ".dank.com";
+        let mut coder = FrameCoder::new();
 
-        assert_eq!(FrameCoder::calculate_domain_length(domain), 10);
+        let frame = coder.decode_frame(&mut buf).unwrap();
+
+        assert!(frame.answers.len() > 0);
+        assert_eq!(frame.answers[0].domain, ".www.facebook.com");
+        assert_eq!(
+            frame.answers[0].record_type,
+            ResourceRecordType::CNameRecord
+        );
+        assert_eq!(
+            frame.answers[0].data,
+            ResourceRecordData::CName(".star-mini.c10r.facebook.com".to_string()),
+        );
     }
 }

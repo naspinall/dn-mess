@@ -36,7 +36,7 @@ pub enum ResourceRecordClass {
     Unimplemented,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResourceRecordData {
     ARecord(u32),
     AAAARecord(u128),
