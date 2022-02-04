@@ -7,7 +7,7 @@ use crate::packets::{
 };
 
 pub struct HashCache {
-    map: Mutex<HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>>
+    map: Mutex<HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>>,
 }
 
 impl HashCache {
@@ -26,20 +26,6 @@ impl HashCache {
         let data = map.get(&(record_type.clone(), domain.to_string()))?;
 
         Some(data.clone())
-    }
-
-    pub async fn put(
-        &self,
-        record_type: &ResourceRecordType,
-        domain: &str,
-        data: &ResourceRecordData,
-        time_to_live: u32,
-    ) {
-        let mut map = self.map.lock().await;
-        map.insert(
-            (record_type.clone(), domain.to_string()),
-            (data.clone(), time_to_live),
-        );
     }
 
     pub async fn put_resource_records(&self, resource_records: &Vec<ResourceRecord>) {

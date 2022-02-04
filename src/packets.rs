@@ -1,7 +1,4 @@
-use std::{
-    fmt,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::{fmt, net::Ipv4Addr};
 
 #[derive(Debug, Clone)]
 pub enum PacketType {
@@ -41,6 +38,7 @@ pub enum ResourceRecordData {
     ARecord(u32),
     AAAARecord(u128),
     CName(String),
+    SOARecord(SOARecord),
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +67,17 @@ pub struct ResourceRecord {
     pub data: ResourceRecordData,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct SOARecord {
+    pub master_name: String,
+    pub mail_name: String,
+    pub serial: u32,
+    pub refresh: u32,
+    pub retry: u32,
+    pub expire: u32,
+    pub minimum: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub id: u16,
@@ -82,7 +91,7 @@ pub struct Frame {
 
     pub questions: Vec<Question>,
     pub answers: Vec<ResourceRecord>,
-    pub name_servers: Vec<Question>,
+    pub name_servers: Vec<ResourceRecord>,
     pub additional_records: Vec<ResourceRecord>,
 }
 
@@ -137,6 +146,12 @@ impl fmt::Display for Frame {
         if !self.answers.is_empty() {
             for answer in self.answers.iter() {
                 write!(f, "answer -> {}", answer)?;
+            }
+        }
+
+        if !self.name_servers.is_empty() {
+            for name_server in self.name_servers.iter() {
+                write!(f, "name server -> {}", name_server)?;
             }
         }
         Ok(())
@@ -198,8 +213,9 @@ impl fmt::Display for ResourceRecordData {
                     *value as u8
                 )
             ),
-            ResourceRecordData::AAAARecord(value) => panic!("OH NO"),
+            ResourceRecordData::AAAARecord(_) => panic!("OH NO"),
             ResourceRecordData::CName(value) => write!(f, "CName: {}", value),
+            ResourceRecordData::SOARecord(value) => write!(f, "SOARecord: {:?}", value),
         }
     }
 }
