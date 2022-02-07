@@ -1,3 +1,4 @@
+use db::a_records::ARecord;
 use log::info;
 use packets::Frame;
 use server::Server;
@@ -5,6 +6,7 @@ use server::Server;
 mod client;
 mod coding;
 mod connection;
+mod db;
 mod errors;
 mod network_buffer;
 mod packets;
@@ -18,6 +20,11 @@ fn log_frame(frame: &Frame) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start the logger
     env_logger::init();
+
+    let connection = sqlite::open("./db.sqlite")?;
+
+    // Run all the migrations
+    db::run_migrations(&connection)?;
 
     let mut server = Server::new();
 
