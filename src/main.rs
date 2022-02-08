@@ -11,6 +11,7 @@ mod errors;
 mod network_buffer;
 mod packets;
 mod server;
+mod zone;
 
 fn log_frame(frame: &Frame) {
     info!("{}", frame);
