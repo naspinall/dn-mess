@@ -1,9 +1,6 @@
-use log::error;
+use log::{error, info};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, Mutex},
-};
+use tokio::{net::UdpSocket, sync::mpsc};
 
 mod cache;
 
@@ -42,6 +39,8 @@ impl Server {
     pub async fn listen(self, port: u16) -> ServerResult<()> {
         // Listen on given port
         let listen_addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+        info!("Listening on {}", listen_addr);
 
         // Wrap socket in reference count for use in both async moves
         let socket = Arc::new(UdpSocket::bind(listen_addr).await?);

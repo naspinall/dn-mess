@@ -5,7 +5,7 @@ pub const MAX_MESSAGE_SIZE: usize = 512;
 type BufferResult<T> = Result<T, NetworkBufferError>;
 pub struct NetworkBuffer {
     pub read_cursor: usize,
-    write_cursor: usize,
+    pub write_cursor: usize,
     pub buf: [u8; 512],
 }
 
@@ -42,6 +42,17 @@ impl NetworkBuffer {
         self.buf[self.write_cursor + 1] = (value & 0x00FF) as u8;
 
         self.write_cursor += 2;
+
+        Ok(())
+    }
+
+    pub fn set_u16(&mut self, index: usize, value: u16) -> BufferResult<()> {
+        if index + 2 >= MAX_MESSAGE_SIZE {
+            return Err(NetworkBufferError::BufferFullError);
+        }
+
+        self.buf[index] = (value >> 8) as u8;
+        self.buf[index + 1] = (value & 0x00FF) as u8;
 
         Ok(())
     }

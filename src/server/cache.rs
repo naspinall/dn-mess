@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::packets::{
     Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
 pub struct HashCache {
-    map: Mutex<HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>>
+    map: RwLock<HashMap<(ResourceRecordType, String), (ResourceRecordData, u32)>>,
 }
 
 impl HashCache {
     pub fn new() -> HashCache {
         HashCache {
-            map: Mutex::new(HashMap::new()),
+            map: RwLock::new(HashMap::new()),
         }
     }
 
@@ -22,28 +22,14 @@ impl HashCache {
         record_type: &ResourceRecordType,
         domain: &str,
     ) -> Option<(ResourceRecordData, u32)> {
-        let map = self.map.lock().await;
+        let map = self.map.read().await;
         let data = map.get(&(record_type.clone(), domain.to_string()))?;
 
         Some(data.clone())
     }
 
-    pub async fn put(
-        &self,
-        record_type: &ResourceRecordType,
-        domain: &str,
-        data: &ResourceRecordData,
-        time_to_live: u32,
-    ) {
-        let mut map = self.map.lock().await;
-        map.insert(
-            (record_type.clone(), domain.to_string()),
-            (data.clone(), time_to_live),
-        );
-    }
-
     pub async fn put_resource_records(&self, resource_records: &Vec<ResourceRecord>) {
-        let mut map = self.map.lock().await;
+        let mut map = self.map.write().await;
         resource_records.iter().for_each(|record| {
             map.insert(
                 (record.record_type.clone(), record.domain.to_string()),
