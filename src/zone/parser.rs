@@ -32,7 +32,8 @@ enum RecordData {
     ARecord(Ipv4Addr),
     AAAARecord(Ipv6Addr),
     MXRecord(usize, String),
-    CName(String),
+    CNameRecord(String),
+    NSRecord(String),
 }
 
 impl std::error::Error for ZoneParserError {}
@@ -122,7 +123,8 @@ fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
         let data = match record_type {
             "A" => RecordData::ARecord(parse_a_record_data(&mut line)?),
             "AAAA" => RecordData::AAAARecord(parse_aaaa_record_data(&mut line)?),
-            "CNAME" => RecordData::CName(parse_cname_record_data(&mut line)?),
+            "CNAME" => RecordData::CNameRecord(parse_name_record_data(&mut line, &name)?),
+            "NS" => RecordData::NSRecord(parse_name_record_data(&mut line, &name)?),
             "MX" => {
                 let (priority, domain) = parse_mx_record_data(&mut line)?;
                 RecordData::MXRecord(priority, domain)
@@ -180,11 +182,16 @@ fn parse_mx_record_data(line: &mut SplitWhitespace) -> ParserResult<(usize, Stri
     Ok((priority, domain))
 }
 
-fn parse_cname_record_data(line: &mut SplitWhitespace) -> ParserResult<String> {
+fn parse_name_record_data(line: &mut SplitWhitespace, root_domain: &str) -> ParserResult<String> {
     // Get only one column
-    let cname = line.next().ok_or_else(|| ZoneParserError::DataParsing)?;
+    let name = line.next().ok_or_else(|| ZoneParserError::DataParsing)?;
 
-    Ok(cname.to_string())
+    // Add the root domain if we are missing the period
+    if !name.ends_with('.') {
+        return Ok(name.to_string() + "." + root_domain);
+    }
+
+    Ok(name.to_string())
 }
 
 #[cfg(test)]
@@ -197,9 +204,10 @@ mod tests {
             $ORIGIN example.com.     ; designates the start of this zone file in the namespace
             $TTL 3600                ; default expiration time (in seconds) of all RRs without their own TTL value
             example.com.  IN  MX    10 mail.example.com.  ; mail.example.com is the mailserver for example.com
-            example.com.  IN  CNAME example.com ; More comments
+            example.com.  IN  CNAME example.com. ; More comments
             @             IN  A     127.0.0.1
             @             IN  AAAA  2001:db8:10::2        ; IPv6 address for ns.example.com
+            example.com.  IN  NS    ns.somewhere ; ns.somewhere.example is a backup nameserver for example.com
         ";
 
         let results = parse(file.as_bytes().to_vec()).unwrap();
@@ -217,7 +225,7 @@ mod tests {
         }
         let cname_record = results.records.get(1).unwrap();
         match cname_record {
-            RecordData::CName(domain) => assert_eq!(domain, "example.com"),
+            RecordData::CNameRecord(domain) => assert_eq!(domain, "example.com."),
             _ => panic!("Bad match"),
         }
         let a_record = results.records.get(2).unwrap();
@@ -231,6 +239,14 @@ mod tests {
         match aaaa_record {
             RecordData::AAAARecord(record) => {
                 assert_eq!("2001:db8:10::2".parse::<Ipv6Addr>().unwrap(), *record)
+            }
+            _ => panic!("Bad match"),
+        }
+
+        let ns_record = results.records.get(4).unwrap();
+        match ns_record {
+            RecordData::NSRecord(record) => {
+                assert_eq!(record, "ns.somewhere.example.com.")
             }
             _ => panic!("Bad match"),
         }
