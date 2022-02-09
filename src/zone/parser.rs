@@ -56,6 +56,14 @@ impl fmt::Display for ZoneParserError {
 
 type ParserResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+async fn parse_file(path: &str) -> ParserResult<ZoneFile> {
+    // Load file
+    let file_bytes = fs::read(path).await?;
+
+    // Parse file into zone
+    parse(file_bytes)
+}
+
 fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
     // Bytes to string
     let file = String::from_utf8(bytes)?;
@@ -77,7 +85,7 @@ fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
     };
 
     // Parsing the zone name
-    let name = line
+    let origin = line
         .next()
         .ok_or_else(|| ZoneParserError::NoOrigin)?
         .to_string();
@@ -107,6 +115,9 @@ fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
 
         if domain == "@" {
             // Set to the last domain if it exists
+            domain = &origin
+        } else if domain == "IN" {
+            // No name has been provided, use previous domain
             domain = previous_domain.ok_or_else(|| ZoneParserError::NoDomain)?;
         }
 
@@ -123,8 +134,8 @@ fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
         let data = match record_type {
             "A" => RecordData::ARecord(parse_a_record_data(&mut line)?),
             "AAAA" => RecordData::AAAARecord(parse_aaaa_record_data(&mut line)?),
-            "CNAME" => RecordData::CNameRecord(parse_name_record_data(&mut line, &name)?),
-            "NS" => RecordData::NSRecord(parse_name_record_data(&mut line, &name)?),
+            "CNAME" => RecordData::CNameRecord(parse_name_record_data(&mut line, &origin)?),
+            "NS" => RecordData::NSRecord(parse_name_record_data(&mut line, &origin)?),
             "MX" => {
                 let (priority, domain) = parse_mx_record_data(&mut line)?;
                 RecordData::MXRecord(priority, domain)
@@ -140,7 +151,7 @@ fn parse(bytes: Vec<u8>) -> ParserResult<ZoneFile> {
     }
 
     Ok(ZoneFile {
-        name,
+        name: origin,
         time_to_live,
         records,
     })
@@ -207,7 +218,8 @@ mod tests {
             example.com.  IN  CNAME example.com. ; More comments
             @             IN  A     127.0.0.1
             @             IN  AAAA  2001:db8:10::2        ; IPv6 address for ns.example.com
-            example.com.  IN  NS    ns.somewhere ; ns.somewhere.example is a backup nameserver for example.com
+            ns.example.com.  IN  NS    ns.somewhere ; ns.somewhere.example is a backup nameserver for example.com
+                          IN A 127.0.0.1; more comments
         ";
 
         let results = parse(file.as_bytes().to_vec()).unwrap();

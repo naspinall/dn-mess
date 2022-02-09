@@ -7,7 +7,7 @@ mod cache;
 use crate::{
     client::Client,
     connection::Connection,
-    packets::{Frame, ResourceRecord},
+    packets::{Frame, ResourceRecord, ResponseCode},
 };
 
 use self::cache::HashCache;
@@ -91,7 +91,10 @@ impl Server {
                 let response = match Server::handle(&request, &cache).await {
                     Err(err) => {
                         error!("Error handling request {}: {}", request.id, err);
-                        return;
+                        // Send an internal error response
+                        let mut error_response = request.build_response();
+                        error_response.response_code = ResponseCode::ServerError;
+                        error_response
                     }
                     Ok(response) => response,
                 };
