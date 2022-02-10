@@ -40,13 +40,28 @@ mod tests {
                 name: "com".to_string(),
                 children: vec![Rc::new(Node {
                     name: "example".to_string(),
-                    children: vec![],
+                    children: vec![Rc::new(Node {
+                        name: "thing".to_string(),
+                        children: vec![],
+                    })],
                 })],
             }),
         };
 
+        // Gets root for example.com
         let found_node = tree.find_zone("example.com.".to_string());
+        assert_eq!(found_node.name, "example".to_string());
 
+        // Gets child
+        let found_node = tree.find_zone("thing.example.com.".to_string());
+        assert_eq!(found_node.name, "thing".to_string());
+
+        // Gets thing.example.com when it cant find a subdomain zone
+        let found_node = tree.find_zone("another.thing.example.com.".to_string());
+        assert_eq!(found_node.name, "thing".to_string());
+
+        // Gets example.com when it cant find a subdomain zone
+        let found_node = tree.find_zone("bangers.example.com.".to_string());
         assert_eq!(found_node.name, "example".to_string());
     }
 }
