@@ -1,4 +1,7 @@
-use std::{fmt, net::Ipv4Addr};
+use std::{
+    fmt,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 #[derive(Debug, Clone)]
 pub enum PacketType {
@@ -226,7 +229,20 @@ impl fmt::Display for ResourceRecordData {
                     *value as u8
                 )
             ),
-            ResourceRecordData::AAAARecord(_) => panic!("OH NO"),
+            ResourceRecordData::AAAARecord(value) => write!(
+                f,
+                "AAAARecord: {}",
+                Ipv6Addr::new(
+                    (value >> 112) as u16,
+                    (value >> 96) as u16,
+                    (value >> 80) as u16,
+                    (value >> 64) as u16,
+                    (value >> 48) as u16,
+                    (value >> 32) as u16,
+                    (value >> 16) as u16,
+                    (value & 0x00FF) as u16,
+                )
+            ),
             ResourceRecordData::CNameRecord(value) => write!(f, "CName: {}", value),
             ResourceRecordData::SOARecord(value) => write!(f, "SOARecord: {:?}", value),
         }

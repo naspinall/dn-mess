@@ -101,6 +101,7 @@ impl FrameCoder {
         // Encode type
         let type_bytes: u16 = match resource_record.record_type {
             ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::AAAARecord => 0x001C,
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
@@ -243,6 +244,7 @@ impl FrameCoder {
         // Encode type
         let type_bytes: u16 = match question.question_type {
             ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::AAAARecord => 0x001C,
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
@@ -281,6 +283,7 @@ impl FrameCoder {
         // Decode the type
         let question_type = match buf.get_u16()? {
             0x0001 => ResourceRecordType::ARecord,
+            0x001C => ResourceRecordType::AAAARecord,
             0x0002 => ResourceRecordType::NSRecord,
             0x0005 => ResourceRecordType::CNameRecord,
             0x000f => ResourceRecordType::MXRecord,
