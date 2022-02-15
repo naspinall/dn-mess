@@ -52,7 +52,6 @@ impl ResourceRecordData {
             ResourceRecordData::AAAARecord(_) => ResourceRecordType::AAAARecord,
             ResourceRecordData::CNameRecord(_) => ResourceRecordType::CNameRecord,
             ResourceRecordData::SOARecord(_) => ResourceRecordType::SOARecord,
-            _ => ResourceRecordType::Unimplemented,
         };
     }
 }

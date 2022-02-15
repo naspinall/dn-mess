@@ -7,7 +7,7 @@ pub(crate) struct Zone {
 }
 
 const TABLE_DEFINITION: &str = "
-    create table zones (
+    create table if not exists zones (
         id integer primary key autoincrement,
         origin text not null,
         time_to_live integer

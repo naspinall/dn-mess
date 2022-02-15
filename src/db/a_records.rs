@@ -6,7 +6,7 @@ pub(crate) struct ARecord {
 }
 
 const TABLE_DEFINITION: &str = "
-    create table a_records (
+    create table if not exists a_records (
         id integer primary key autoincrement,
         name text not null,
         time_to_live integer not null,

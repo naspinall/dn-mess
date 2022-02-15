@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = sqlite::open("./db.sqlite")?;
 
     // Run all the migrations
-    // db::run_migrations(&connection)?;
+    db::run_migrations(&connection)?;
 
     let mut server = Server::new();
 
