@@ -117,7 +117,7 @@ impl Server {
             recurse_request.add_question(question);
         }
 
-        if request.recursion_desired && remaining_questions.len() > 0 {
+        if request.recursion_desired && !remaining_questions.is_empty() {
             // Recurse to get answers
             let upstream_answers = Server::recurse_query(&recurse_request).await?;
 
@@ -125,8 +125,12 @@ impl Server {
                 response.add_answer(answer);
             }
 
-            // Add upstream answers to the cache
-            cache.put_resource_records(&upstream_answers).await;
+            // Set for all questions, will need to remove support for multiple questions
+            for question in remaining_questions.iter() {
+                // Add upstream answers to the cache
+                cache.put_resource_records(&question.domain, &question.question_type, &upstream_answers).await;
+            }
+
         }
 
         for question in request.questions.iter() {

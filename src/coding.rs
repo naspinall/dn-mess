@@ -101,6 +101,7 @@ impl FrameCoder {
         // Encode type
         let type_bytes: u16 = match resource_record.record_type {
             ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::AAAARecord => 0x001C,
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
@@ -126,7 +127,7 @@ impl FrameCoder {
                 buf.put_u16(16)?;
                 buf.put_u128(*record)
             }
-            ResourceRecordData::CName(domain) => {
+            ResourceRecordData::CNameRecord(domain) => {
                 // Where length should be
                 let length_index = buf.write_cursor;
 
@@ -243,6 +244,7 @@ impl FrameCoder {
         // Encode type
         let type_bytes: u16 = match question.question_type {
             ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::AAAARecord => 0x001C,
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
@@ -281,6 +283,7 @@ impl FrameCoder {
         // Decode the type
         let question_type = match buf.get_u16()? {
             0x0001 => ResourceRecordType::ARecord,
+            0x001C => ResourceRecordType::AAAARecord,
             0x0002 => ResourceRecordType::NSRecord,
             0x0005 => ResourceRecordType::CNameRecord,
             0x000f => ResourceRecordType::MXRecord,
@@ -371,8 +374,9 @@ impl FrameCoder {
 
         self.save_decoded_names(&decoded_names, &decoded_indexes);
 
-        let mut name = String::from('.');
-        name.push_str(&decoded_names.join("."));
+        let mut name = decoded_names.join(".");
+
+        name.push('.');
 
         Ok(name)
     }
@@ -418,7 +422,9 @@ impl FrameCoder {
 
         let record_data = match record_type {
             ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
-            ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_name(buf)?),
+            ResourceRecordType::CNameRecord => {
+                ResourceRecordData::CNameRecord(self.decode_name(buf)?)
+            }
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
             ResourceRecordType::SOARecord => {
                 ResourceRecordData::SOARecord(self.decode_soa_record(buf)?)
@@ -761,7 +767,7 @@ mod tests {
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.data {
-            ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
+            ResourceRecordData::CNameRecord(value) => assert_eq!(value, ".www.google.com"),
             _ => panic!("Bad resource record"),
         }
     }
@@ -810,7 +816,7 @@ mod tests {
         );
         assert_eq!(
             frame.answers[0].data,
-            ResourceRecordData::CName(".star-mini.c10r.facebook.com".to_string()),
+            ResourceRecordData::CNameRecord(".star-mini.c10r.facebook.com".to_string()),
         );
     }
 }
