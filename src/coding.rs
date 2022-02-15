@@ -126,7 +126,7 @@ impl FrameCoder {
                 buf.put_u16(16)?;
                 buf.put_u128(*record)
             }
-            ResourceRecordData::CName(domain) => {
+            ResourceRecordData::CNameRecord(domain) => {
                 // Where length should be
                 let length_index = buf.write_cursor;
 
@@ -418,7 +418,7 @@ impl FrameCoder {
 
         let record_data = match record_type {
             ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
-            ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_name(buf)?),
+            ResourceRecordType::CNameRecord => ResourceRecordData::CNameRecord(self.decode_name(buf)?),
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
             ResourceRecordType::SOARecord => {
                 ResourceRecordData::SOARecord(self.decode_soa_record(buf)?)
@@ -761,7 +761,7 @@ mod tests {
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.data {
-            ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
+            ResourceRecordData::CNameRecord(value) => assert_eq!(value, ".www.google.com"),
             _ => panic!("Bad resource record"),
         }
     }
@@ -810,7 +810,7 @@ mod tests {
         );
         assert_eq!(
             frame.answers[0].data,
-            ResourceRecordData::CName(".star-mini.c10r.facebook.com".to_string()),
+            ResourceRecordData::CNameRecord(".star-mini.c10r.facebook.com".to_string()),
         );
     }
 }
