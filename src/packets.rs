@@ -42,7 +42,6 @@ pub enum ResourceRecordData {
 }
 
 impl ResourceRecordData {
-
     // This shouldn't need to exist, should just store the type in the data
     pub fn get_type(&self) -> ResourceRecordType {
         return match self {
@@ -51,7 +50,7 @@ impl ResourceRecordData {
             ResourceRecordData::CNameRecord(_) => ResourceRecordType::CNameRecord,
             ResourceRecordData::SOARecord(_) => ResourceRecordType::SOARecord,
             _ => ResourceRecordType::Unimplemented,
-        }
+        };
     }
 }
 

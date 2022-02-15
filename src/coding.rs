@@ -371,8 +371,9 @@ impl FrameCoder {
 
         self.save_decoded_names(&decoded_names, &decoded_indexes);
 
-        let mut name = String::from('.');
-        name.push_str(&decoded_names.join("."));
+        let mut name = decoded_names.join(".");
+
+        name.push('.');
 
         Ok(name)
     }
@@ -418,7 +419,9 @@ impl FrameCoder {
 
         let record_data = match record_type {
             ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
-            ResourceRecordType::CNameRecord => ResourceRecordData::CNameRecord(self.decode_name(buf)?),
+            ResourceRecordType::CNameRecord => {
+                ResourceRecordData::CNameRecord(self.decode_name(buf)?)
+            }
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
             ResourceRecordType::SOARecord => {
                 ResourceRecordData::SOARecord(self.decode_soa_record(buf)?)
