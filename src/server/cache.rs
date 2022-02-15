@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use chrono::Utc;
 use tokio::sync::RwLock;
@@ -8,13 +8,7 @@ use crate::packets::{
 };
 
 pub struct HashCache {
-    map: RwLock<HashMap<CacheKey, CacheValue>>,
-}
-
-#[derive(Eq, PartialEq, Hash)]
-struct CacheKey {
-    record_type: ResourceRecordType,
-    domain: String,
+    map: RwLock<HashMap<CacheKey, Vec<CacheValue>>>,
 }
 
 struct CacheValue {
@@ -22,6 +16,8 @@ struct CacheValue {
     time_to_live: u32,
     expiration: i64,
 }
+
+type CacheKey = (String, ResourceRecordType);
 
 impl CacheValue {
     pub fn is_expired(&self) -> bool {
@@ -46,48 +42,58 @@ impl HashCache {
         }
     }
 
-    pub async fn get(
-        &self,
-        record_type: &ResourceRecordType,
-        domain: &str,
-    ) -> Option<ResourceRecord> {
+    pub async fn get(&self, record_type: &ResourceRecordType, domain: &str) -> Vec<ResourceRecord> {
         // Get a read lock
         let map = self.map.read().await;
 
         // Find the value in the cache return none if it doesn't exist
-        let result = map.get(&CacheKey {
-            record_type: record_type.clone(),
-            domain: domain.to_string(),
-        })?;
+        let results = map.get(&(domain.to_string(), record_type.clone()));
 
-        // Check if the result has been expired
-        if result.is_expired() {
-            return None;
+        match results {
+            Some(results) => {
+                // Filter out all the expired values
+                return results
+                    .iter()
+                    .filter_map(|value| {
+                        if value.is_expired() {
+                            return None;
+                        }
+
+                        Some(value.to_resource_record(domain))
+                    })
+                    .collect();
+            }
+
+            // Just return an empty vector
+            None => return vec![],
         }
-
-        // Convert result to a resource record, return
-        Some(result.to_resource_record(domain))
     }
 
-    pub async fn put_resource_records(&self, domain: &str, record_type : &ResourceRecordType, resource_records: &[ResourceRecord]) {
+    pub async fn put_resource_records(
+        &self,
+        domain: &str,
+        record_type: &ResourceRecordType,
+        resource_records: &[ResourceRecord],
+    ) {
         let mut map = self.map.write().await;
-        resource_records.iter().for_each(|record| {
-            let cache_key = CacheKey {
-                domain: domain.to_string(),
-                record_type: record_type.clone(),
-            };
 
-            // Get the expiration time
-            let expiration = Utc::now().timestamp() + record.time_to_live as i64;
+        let cache_key: CacheKey = (domain.to_string(), record_type.clone());
 
-            let cache_value = CacheValue {
-                data: record.data.clone(),
-                time_to_live: record.time_to_live,
-                expiration,
-            };
+        let cache_value = resource_records
+            .iter()
+            .map(|record| {
+                // Get the expiration time
+                let expiration = Utc::now().timestamp() + record.time_to_live as i64;
 
-            map.insert(cache_key, cache_value);
-        })
+                CacheValue {
+                    data: record.data.clone(),
+                    time_to_live: record.time_to_live,
+                    expiration,
+                }
+            })
+            .collect();
+
+        map.insert(cache_key, cache_value);
     }
 
     pub async fn get_intersection(
@@ -99,12 +105,17 @@ impl HashCache {
         let mut answers = vec![];
 
         for question in questions.iter() {
-            match self.get(&question.question_type, &question.domain).await {
-                // Found so we'll add to the answers vector
-                Some(data) => answers.push(data),
+            let mut found_answer = false;
+            self.get(&question.question_type, &question.domain)
+                .await
+                .iter()
+                .for_each(|value| {
+                    answers.push(value.clone());
+                    found_answer = true
+                });
 
-                // Not found so add to vector
-                None => excluded_questions.push(question.clone()),
+            if !found_answer {
+                excluded_questions.push(question.clone())
             }
         }
 
