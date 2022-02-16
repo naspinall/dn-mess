@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::vec;
+use std::{usize, vec};
 
 use crate::errors::NetworkBufferError;
 use crate::network_buffer::NetworkBuffer;
@@ -108,6 +108,7 @@ impl FrameCoder {
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
             ResourceRecordType::SOARecord => 0x0006,
+            ResourceRecordType::TXTRecord => 0x0010,
             _ => 0x0000,
         };
 
@@ -156,7 +157,6 @@ impl FrameCoder {
                 buf.set_u16(length_index, length as u16)
             }
             ResourceRecordData::MX(preference, exchange) => {
-                
                 let length_index = buf.write_cursor;
 
                 buf.put_u16(0)?;
@@ -166,7 +166,11 @@ impl FrameCoder {
                 length += self.encode_name(exchange, buf)?;
 
                 buf.set_u16(length_index, length as u16)
+            }
 
+            ResourceRecordData::TXT(value) => {
+                // TODO
+                Ok(())
             }
         }
     }
@@ -414,19 +418,18 @@ impl FrameCoder {
         let time_to_live = buf.get_u32()?;
 
         // TODO verify data length here
-        let _data_length = buf.get_u16()?;
+        let data_length = buf.get_u16()?;
 
         let record_data = match record_type {
             ResourceRecordType::ARecord => ResourceRecordData::A(buf.get_u32()?),
-            ResourceRecordType::CNameRecord => {
-                ResourceRecordData::CName(self.decode_name(buf)?)
-            }
+            ResourceRecordType::CNameRecord => ResourceRecordData::CName(self.decode_name(buf)?),
             ResourceRecordType::AAAARecord => ResourceRecordData::AAAA(buf.get_u128()?),
-            ResourceRecordType::SOARecord => {
-                ResourceRecordData::SOA(self.decode_soa_record(buf)?)
-            }
+            ResourceRecordType::SOARecord => ResourceRecordData::SOA(self.decode_soa_record(buf)?),
             ResourceRecordType::MXRecord => {
-                ResourceRecordData::MX(buf.get_u16()?,self.decode_name(buf)?)
+                ResourceRecordData::MX(buf.get_u16()?, self.decode_name(buf)?)
+            }
+            ResourceRecordType::TXTRecord => {
+                ResourceRecordData::TXT(self.decode_txt_record(buf, data_length.into())?)
             }
             _ => return Err(NetworkBufferError::InvalidPacket),
         };
@@ -450,6 +453,25 @@ impl FrameCoder {
             expire: buf.get_u32()?,
             minimum: buf.get_u32()?,
         })
+    }
+
+    pub fn decode_txt_record(
+        &mut self,
+        buf: &mut NetworkBuffer,
+        length: usize,
+    ) -> CodingResult<String> {
+        let mut result = String::new();
+
+        for mut _i in 0..length {
+            let sequence_length = buf.get_u8()?;
+
+            for _j in 0..sequence_length {
+                result.push(buf.get_u8()? as char);
+                _i += 1;
+            }
+        }
+
+        Ok(result)
     }
 
     pub fn encode_frame(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
@@ -507,11 +529,12 @@ impl FrameCoder {
         let question_count = buf.get_u16()?;
         let answer_count = buf.get_u16()?;
         let name_server_count = buf.get_u16()?;
-        let _additional_records_count = buf.get_u16()?;
+        let additional_records_count = buf.get_u16()?;
 
         let mut questions: Vec<Question> = Vec::new();
         let mut answers: Vec<ResourceRecord> = Vec::new();
         let mut name_servers: Vec<ResourceRecord> = Vec::new();
+        let mut additional_records: Vec<ResourceRecord> = Vec::new();
 
         // Encode question
         for _ in 0..question_count {
@@ -531,6 +554,12 @@ impl FrameCoder {
             name_servers.push(name_server);
         }
 
+        // Encode additional records
+        for _ in 0..additional_records_count {
+            let additional_record = self.decode_resource_record(buf)?;
+            additional_records.push(additional_record);
+        }
+
         Ok(Frame {
             id,
             packet_type,
@@ -545,7 +574,7 @@ impl FrameCoder {
             questions,
             answers,
             name_servers,
-            additional_records: vec![],
+            additional_records,
         })
     }
 }
