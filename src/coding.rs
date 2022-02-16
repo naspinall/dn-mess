@@ -55,7 +55,9 @@ impl FrameCoder {
     ) -> CodingResult<()> {
         let compressed_offset = 0xC000 | offset as u16;
 
-        buf.put_u16(compressed_offset)
+        buf.put_u16(compressed_offset)?;
+
+        Ok(())
     }
 
     pub fn encode_name(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
@@ -120,16 +122,16 @@ impl FrameCoder {
 
         // Encode RDdata field
         match &resource_record.data {
-            ResourceRecordData::ARecord(record) => {
+            ResourceRecordData::A(record) => {
                 buf.put_u16(4)?;
                 buf.put_u32(*record)?;
                 Ok(())
             }
-            ResourceRecordData::AAAARecord(record) => {
+            ResourceRecordData::AAAA(record) => {
                 buf.put_u16(16)?;
                 buf.put_u128(*record)
             }
-            ResourceRecordData::CNameRecord(domain) => {
+            ResourceRecordData::CName(domain) => {
                 // Where length should be
                 let length_index = buf.write_cursor;
 
@@ -144,7 +146,7 @@ impl FrameCoder {
 
                 Ok(())
             }
-            ResourceRecordData::SOARecord(record) => {
+            ResourceRecordData::SOA(record) => {
                 let length_index = buf.write_cursor;
                 // Write blank data to where size is
                 buf.put_u16(0)?;
@@ -152,6 +154,19 @@ impl FrameCoder {
                 let length = self.encode_soa_record(record, buf)?;
 
                 buf.set_u16(length_index, length as u16)
+            }
+            ResourceRecordData::MX(preference, exchange) => {
+                
+                let length_index = buf.write_cursor;
+
+                buf.put_u16(0)?;
+
+                let mut length = buf.put_u16(*preference)?;
+
+                length += self.encode_name(exchange, buf)?;
+
+                buf.set_u16(length_index, length as u16)
+
             }
         }
     }
@@ -203,7 +218,9 @@ impl FrameCoder {
         buf.put_u16(frame.name_servers.len() as u16)?;
         // Encode Additional Records Count
 
-        buf.put_u16(frame.additional_records.len() as u16)
+        buf.put_u16(frame.additional_records.len() as u16)?;
+
+        Ok(())
     }
 
     pub fn encode_question(
@@ -228,7 +245,9 @@ impl FrameCoder {
         buf.put_u16(type_bytes)?;
 
         // Encode class
-        buf.put_u16(1)
+        buf.put_u16(1)?;
+
+        Ok(())
     }
 
     pub fn encode_soa_record(
@@ -396,13 +415,16 @@ impl FrameCoder {
         let _data_length = buf.get_u16()?;
 
         let record_data = match record_type {
-            ResourceRecordType::ARecord => ResourceRecordData::ARecord(buf.get_u32()?),
+            ResourceRecordType::ARecord => ResourceRecordData::A(buf.get_u32()?),
             ResourceRecordType::CNameRecord => {
-                ResourceRecordData::CNameRecord(self.decode_name(buf)?)
+                ResourceRecordData::CName(self.decode_name(buf)?)
             }
-            ResourceRecordType::AAAARecord => ResourceRecordData::AAAARecord(buf.get_u128()?),
+            ResourceRecordType::AAAARecord => ResourceRecordData::AAAA(buf.get_u128()?),
             ResourceRecordType::SOARecord => {
-                ResourceRecordData::SOARecord(self.decode_soa_record(buf)?)
+                ResourceRecordData::SOA(self.decode_soa_record(buf)?)
+            }
+            ResourceRecordType::MXRecord => {
+                ResourceRecordData::MX(buf.get_u16()?,self.decode_name(buf)?)
             }
             _ => return Err(NetworkBufferError::InvalidPacket),
         };
@@ -676,7 +698,7 @@ mod tests {
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.data {
-            ResourceRecordData::ARecord(value) => assert_eq!(value, 0x08080808),
+            ResourceRecordData::A(value) => assert_eq!(value, 0x08080808),
             _ => panic!("Bad resource record"),
         }
     }
@@ -708,7 +730,7 @@ mod tests {
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.data {
-            ResourceRecordData::AAAARecord(value) => {
+            ResourceRecordData::AAAA(value) => {
                 assert_eq!(value, 0x08080808080808080808080808080808)
             }
             _ => panic!("Bad resource record"),
@@ -742,7 +764,7 @@ mod tests {
 
         assert_eq!(resource_record.time_to_live, 255);
         match resource_record.data {
-            ResourceRecordData::CNameRecord(value) => assert_eq!(value, ".www.google.com"),
+            ResourceRecordData::CName(value) => assert_eq!(value, ".www.google.com"),
             _ => panic!("Bad resource record"),
         }
     }
@@ -791,7 +813,7 @@ mod tests {
         );
         assert_eq!(
             frame.answers[0].data,
-            ResourceRecordData::CNameRecord(".star-mini.c10r.facebook.com".to_string()),
+            ResourceRecordData::CName(".star-mini.c10r.facebook.com".to_string()),
         );
     }
 }

@@ -28,8 +28,6 @@ impl std::error::Error for ConnectionError {}
 
 impl fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            _ => write!(f, "Connection error"),
-        }
+        write!(f, "Connection error")
     }
 }

@@ -38,21 +38,23 @@ pub enum ResourceRecordClass {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResourceRecordData {
-    ARecord(u32),
-    AAAARecord(u128),
-    CNameRecord(String),
-    SOARecord(SOARecord),
+    A(u32),
+    AAAA(u128),
+    CName(String),
+    SOA(SOARecord),
+    MX(u16, String),
 }
 
 impl ResourceRecordData {
     // This shouldn't need to exist, should just store the type in the data
     pub fn get_type(&self) -> ResourceRecordType {
-        return match self {
-            ResourceRecordData::ARecord(_) => ResourceRecordType::ARecord,
-            ResourceRecordData::AAAARecord(_) => ResourceRecordType::AAAARecord,
-            ResourceRecordData::CNameRecord(_) => ResourceRecordType::CNameRecord,
-            ResourceRecordData::SOARecord(_) => ResourceRecordType::SOARecord,
-        };
+        match self {
+            ResourceRecordData::A(_) => ResourceRecordType::ARecord,
+            ResourceRecordData::AAAA(_) => ResourceRecordType::AAAARecord,
+            ResourceRecordData::CName(_) => ResourceRecordType::CNameRecord,
+            ResourceRecordData::SOA(_) => ResourceRecordType::SOARecord,
+            ResourceRecordData::MX(_, _) => ResourceRecordType::MXRecord,
+        }
     }
 }
 
@@ -240,7 +242,7 @@ impl fmt::Display for ResourceRecord {
 impl fmt::Display for ResourceRecordData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ResourceRecordData::ARecord(value) => write!(
+            ResourceRecordData::A(value) => write!(
                 f,
                 "ARecord: {}",
                 Ipv4Addr::new(
@@ -250,7 +252,7 @@ impl fmt::Display for ResourceRecordData {
                     *value as u8
                 )
             ),
-            ResourceRecordData::AAAARecord(value) => write!(
+            ResourceRecordData::AAAA(value) => write!(
                 f,
                 "AAAARecord: {}",
                 Ipv6Addr::new(
@@ -264,8 +266,9 @@ impl fmt::Display for ResourceRecordData {
                     (value & 0x00FF) as u16,
                 )
             ),
-            ResourceRecordData::CNameRecord(value) => write!(f, "CName: {}", value),
-            ResourceRecordData::SOARecord(value) => write!(f, "SOARecord: {:?}", value),
+            ResourceRecordData::CName(value) => write!(f, "CName: {}", value),
+            ResourceRecordData::SOA(value) => write!(f, "SOARecord: {:?}", value),
+            ResourceRecordData::MX(preference, exchange) => write!(f, "MXRecord: preference {:?}, exchange {:?}", preference, exchange)
         }
     }
 }
