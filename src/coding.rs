@@ -238,6 +238,7 @@ impl FrameCoder {
             ResourceRecordType::NSRecord => 0x0002,
             ResourceRecordType::CNameRecord => 0x0005,
             ResourceRecordType::MXRecord => 0x000f,
+            ResourceRecordType::SOARecord => 0x0006,
             _ => 0x0000,
         };
 
@@ -281,6 +282,7 @@ impl FrameCoder {
             0x0002 => ResourceRecordType::NSRecord,
             0x0005 => ResourceRecordType::CNameRecord,
             0x000f => ResourceRecordType::MXRecord,
+            0x0006 => ResourceRecordType::SOARecord,
             _ => ResourceRecordType::Unimplemented,
         };
 
