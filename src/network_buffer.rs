@@ -57,7 +57,7 @@ impl NetworkBuffer {
         Ok(())
     }
 
-    pub fn put_u32(&mut self, value: u32) -> BufferResult<()> {
+    pub fn put_u32(&mut self, value: u32) -> BufferResult<usize> {
         if self.write_cursor + 4 >= MAX_MESSAGE_SIZE {
             return Err(NetworkBufferError::BufferFullError);
         }
@@ -69,7 +69,7 @@ impl NetworkBuffer {
 
         self.write_cursor += 4;
 
-        Ok(())
+        Ok(4)
     }
 
     pub fn put_u128(&mut self, value: u128) -> BufferResult<()> {

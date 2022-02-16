@@ -120,8 +120,8 @@ impl Frame {
             // These options will be set elsewhere
             authoritative_answer: false,
             truncation: false,
-            recursion_desired: false,
-            recursion_available: false,
+            recursion_desired: true,
+            recursion_available: true,
             // Default to no error
             response_code: ResponseCode::None,
 
@@ -146,6 +146,28 @@ impl Frame {
 
     pub fn add_answer(&mut self, answer: &ResourceRecord) {
         self.answers.push(answer.clone());
+    }
+
+    pub fn add_name_server(&mut self, name_server: &ResourceRecord) {
+        self.name_servers.push(name_server.clone());
+    }
+
+    pub fn add_answers(&mut self, answers: Vec<ResourceRecord>) {
+        for answer in answers {
+            self.answers.push(answer)
+        }
+    }
+
+    pub fn add_name_servers(&mut self, name_servers: Vec<ResourceRecord>) {
+        for name_server in name_servers {
+            self.name_servers.push(name_server)
+        }
+    }
+
+    pub fn add_questions(&mut self, questions: Vec<Question>) {
+        for question in questions {
+            self.questions.push(question)
+        }
     }
 }
 

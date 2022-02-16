@@ -58,102 +58,7 @@ impl FrameCoder {
         buf.put_u16(compressed_offset)
     }
 
-    pub fn encode_name(&mut self, name: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
-        // Check if name has already been cached
-        if let Some(index) = self.get_compressed_name(name) {
-            // Write the whole compressed name
-            self.write_compressed_name(*index, buf)?;
-
-            // Will only ever be one byte
-            return Ok(());
-        };
-
-        // Set domain into hashmap
-        self.set_compressed_name(name, buf);
-
-        let labels = name.split('.');
-
-        for label in labels {
-            // Skip empty strings
-            if label.is_empty() {
-                continue;
-            }
-
-            // Add length plus one for length byte
-            self.encode_name_label(&label.to_string(), buf)?;
-        }
-
-        // Terminating name
-        buf.put_u8(0x00)?;
-
-        // Return length for null byte
-        Ok(())
-    }
-
-    pub fn encode_resource_record(
-        &mut self,
-        resource_record: &ResourceRecord,
-        buf: &mut NetworkBuffer,
-    ) -> CodingResult<()> {
-        // Encode domain name
-        self.encode_name(&resource_record.domain, buf)?;
-
-        // Encode type
-        let type_bytes: u16 = match resource_record.record_type {
-            ResourceRecordType::ARecord => 0x0001,
-            ResourceRecordType::AAAARecord => 0x001C,
-            ResourceRecordType::NSRecord => 0x0002,
-            ResourceRecordType::CNameRecord => 0x0005,
-            ResourceRecordType::MXRecord => 0x000f,
-            _ => 0x0000,
-        };
-
-        // Encode the type
-        buf.put_u16(type_bytes)?;
-
-        // Encode class
-        buf.put_u16(1)?;
-
-        // Encode time to live
-        buf.put_u32(resource_record.time_to_live)?;
-
-        // Encode RDdata field
-        match &resource_record.data {
-            ResourceRecordData::ARecord(record) => {
-                buf.put_u16(4)?;
-                buf.put_u32(*record)
-            }
-            ResourceRecordData::AAAARecord(record) => {
-                buf.put_u16(16)?;
-                buf.put_u128(*record)
-            }
-            ResourceRecordData::CNameRecord(domain) => {
-                // Where length should be
-                let length_index = buf.write_cursor;
-
-                // Write blank data to where size is
-                buf.put_u16(0)?;
-
-                // Write record data, add one for null terminating byte
-                let record_data_length = self.encode_resource_record_data(&domain, buf)? + 1;
-
-                // Add null terminating byte
-                buf.put_u8(0)?;
-
-                // Set size value
-                buf.set_u16(length_index, record_data_length as u16)?;
-
-                Ok(())
-            }
-            ResourceRecordData::SOARecord(record) => self.encode_soa_record(record, buf),
-        }
-    }
-
-    pub fn encode_resource_record_data(
-        &mut self,
-        domain: &str,
-        buf: &mut NetworkBuffer,
-    ) -> CodingResult<usize> {
+    pub fn encode_name(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
         let starting_index = buf.write_cursor;
 
         // Check if domain has already been cached
@@ -179,8 +84,76 @@ impl FrameCoder {
             self.encode_name_label(&label.to_string(), buf)?;
         }
 
+        buf.put_u8(0x00)?;
+
         // Return length for null byte
         Ok(buf.write_cursor - starting_index)
+    }
+
+    pub fn encode_resource_record(
+        &mut self,
+        resource_record: &ResourceRecord,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
+        // Encode domain name
+        self.encode_name(&resource_record.domain, buf)?;
+
+        // Encode type
+        let type_bytes: u16 = match resource_record.record_type {
+            ResourceRecordType::ARecord => 0x0001,
+            ResourceRecordType::AAAARecord => 0x001C,
+            ResourceRecordType::NSRecord => 0x0002,
+            ResourceRecordType::CNameRecord => 0x0005,
+            ResourceRecordType::MXRecord => 0x000f,
+            ResourceRecordType::SOARecord => 0x0006,
+            _ => 0x0000,
+        };
+
+        // Encode the type
+        buf.put_u16(type_bytes)?;
+
+        // Encode class
+        buf.put_u16(1)?;
+
+        // Encode time to live
+        buf.put_u32(resource_record.time_to_live)?;
+
+        // Encode RDdata field
+        match &resource_record.data {
+            ResourceRecordData::ARecord(record) => {
+                buf.put_u16(4)?;
+                buf.put_u32(*record)?;
+                Ok(())
+            }
+            ResourceRecordData::AAAARecord(record) => {
+                buf.put_u16(16)?;
+                buf.put_u128(*record)
+            }
+            ResourceRecordData::CNameRecord(domain) => {
+                // Where length should be
+                let length_index = buf.write_cursor;
+
+                // Write blank data to where size is
+                buf.put_u16(0)?;
+
+                // Write record data, add one for null terminating byte
+                let record_data_length = self.encode_name(&domain, buf)?;
+
+                // Set size value
+                buf.set_u16(length_index, record_data_length as u16)?;
+
+                Ok(())
+            }
+            ResourceRecordData::SOARecord(record) => {
+                let length_index = buf.write_cursor;
+                // Write blank data to where size is
+                buf.put_u16(0)?;
+
+                let length = self.encode_soa_record(record, buf)?;
+
+                buf.set_u16(length_index, length as u16)
+            }
+        }
     }
 
     pub fn encode_header(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
@@ -262,18 +235,20 @@ impl FrameCoder {
         &mut self,
         soa_record: &SOARecord,
         buf: &mut NetworkBuffer,
-    ) -> CodingResult<()> {
+    ) -> CodingResult<usize> {
+        let mut write_count = 0;
+
         // Encode domain name
-        self.encode_name(&soa_record.master_name, buf)?;
-        self.encode_name(&soa_record.mail_name, buf)?;
+        write_count += self.encode_name(&soa_record.master_name, buf)?;
+        write_count += self.encode_name(&soa_record.mail_name, buf)?;
 
-        buf.put_u32(soa_record.serial)?;
-        buf.put_u32(soa_record.refresh)?;
-        buf.put_u32(soa_record.retry)?;
-        buf.put_u32(soa_record.expire)?;
-        buf.put_u32(soa_record.minimum)?;
+        write_count += buf.put_u32(soa_record.serial)?;
+        write_count += buf.put_u32(soa_record.refresh)?;
+        write_count += buf.put_u32(soa_record.retry)?;
+        write_count += buf.put_u32(soa_record.expire)?;
+        write_count += buf.put_u32(soa_record.minimum)?;
 
-        Ok(())
+        Ok(write_count)
     }
 
     pub fn decode_question(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Question> {

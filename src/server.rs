@@ -87,16 +87,16 @@ impl Server {
 
             // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
+                let id = request.id;
+
                 // Handle the request, log any errors
-                let response = match Server::handle(&request, &cache).await {
+                let response = match Server::handle(request, &cache).await {
                     Err(err) => {
-                        error!("Error handling request {}: {}", request.id, err);
+                        error!("Error handling request {}: {}", id, err);
                         return;
                     }
                     Ok(response) => response,
                 };
-
-                let id = response.id;
 
                 if let Some(err) = rx.send((response, addr)).await.err() {
                     error!("Error sending {} down response channel: {}", id, err);
@@ -105,7 +105,7 @@ impl Server {
         }
     }
 
-    pub async fn handle(request: &Frame, cache: &Cache) -> ServerResult<Frame> {
+    pub async fn handle(request: Frame, cache: &Cache) -> ServerResult<Frame> {
         // Create response
         let mut response = request.build_response();
 
@@ -119,36 +119,51 @@ impl Server {
 
         if request.recursion_desired && !remaining_questions.is_empty() {
             // Recurse to get answers
-            let upstream_answers = Server::recurse_query(&recurse_request).await?;
+            let (upstream_answers, upstream_name_servers) =
+                Server::recurse_query(&recurse_request).await?;
 
             for answer in upstream_answers.iter() {
                 response.add_answer(answer);
             }
 
+            for name_server in upstream_name_servers.iter() {
+                response.add_name_server(name_server);
+            }
+
             // Set for all questions, will need to remove support for multiple questions
             for question in remaining_questions.iter() {
                 // Add upstream answers to the cache
-                cache.put_resource_records(&question.domain, &question.question_type, &upstream_answers).await;
+                cache
+                    .put_resource_records(
+                        &question.domain,
+                        &question.question_type,
+                        &upstream_answers,
+                    )
+                    .await;
+
+                cache
+                    .put_resource_records(
+                        &question.domain,
+                        &question.question_type,
+                        &upstream_name_servers,
+                    )
+                    .await;
             }
-
         }
 
-        for question in request.questions.iter() {
-            response.add_question(question);
-        }
-
-        for answer in cache_answers.iter() {
-            response.add_answer(answer);
-        }
+        response.add_questions(request.questions);
+        response.add_answers(cache_answers);
 
         Ok(response)
     }
 
-    pub async fn recurse_query(request: &Frame) -> ServerResult<Vec<ResourceRecord>> {
+    pub async fn recurse_query(
+        request: &Frame,
+    ) -> ServerResult<(Vec<ResourceRecord>, Vec<ResourceRecord>)> {
         let mut client = Client::dial(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
 
         let response = client.send(request).await?;
 
-        Ok(response.answers)
+        Ok((response.answers, response.name_servers))
     }
 }
