@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-use crate::{connection::Connection, packets::Frame};
+use super::{connection::Connection, packets::Message};
 
 type ClientResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -27,15 +27,15 @@ impl Client {
         })
     }
 
-    pub async fn send(&mut self, frame: &Frame) -> ClientResult<Frame> {
-        // Write frame to downstream
+    pub async fn send(&mut self, message: &Message) -> ClientResult<Message> {
+        // Write message to downstream
         self.connection
-            .write_frame(&self.sock, frame, &self.addr)
+            .write_frame(&self.sock, message, &self.addr)
             .await?;
 
         // Ignore address as we have connected.
-        let (_, frame) = self.connection.read_frame(&self.sock).await?;
+        let (_, message) = self.connection.read_frame(&self.sock).await?;
 
-        Ok(frame)
+        Ok(message)
     }
 }

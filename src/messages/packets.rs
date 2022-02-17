@@ -43,6 +43,7 @@ pub enum ResourceRecordData {
     CName(String),
     SOA(SOARecord),
     MX(u16, String),
+    TXT(String),
 }
 
 impl ResourceRecordData {
@@ -54,6 +55,7 @@ impl ResourceRecordData {
             ResourceRecordData::CName(_) => ResourceRecordType::CNameRecord,
             ResourceRecordData::SOA(_) => ResourceRecordType::SOARecord,
             ResourceRecordData::MX(_, _) => ResourceRecordType::MXRecord,
+            ResourceRecordData::TXT(_) => ResourceRecordType::TXTRecord,
         }
     }
 }
@@ -96,7 +98,7 @@ pub struct SOARecord {
 }
 
 #[derive(Debug, Clone)]
-pub struct Frame {
+pub struct Message {
     pub id: u16,
     pub packet_type: PacketType,
     pub op_code: u8,
@@ -112,68 +114,7 @@ pub struct Frame {
     pub additional_records: Vec<ResourceRecord>,
 }
 
-impl Frame {
-    fn response_frame(&self, response_type: PacketType, id: u16) -> Frame {
-        Frame {
-            id,
-            packet_type: response_type,
-            // Only support standard queries
-            op_code: 0,
-            // These options will be set elsewhere
-            authoritative_answer: false,
-            truncation: false,
-            recursion_desired: true,
-            recursion_available: true,
-            // Default to no error
-            response_code: ResponseCode::None,
-
-            questions: vec![],
-            answers: vec![],
-            name_servers: vec![],
-            additional_records: vec![],
-        }
-    }
-
-    pub fn build_query(&self, id: u16) -> Frame {
-        self.response_frame(PacketType::Query, id)
-    }
-
-    pub fn build_response(&self) -> Frame {
-        self.response_frame(PacketType::Response, self.id)
-    }
-
-    pub fn add_question(&mut self, question: &Question) {
-        self.questions.push(question.clone());
-    }
-
-    pub fn add_answer(&mut self, answer: &ResourceRecord) {
-        self.answers.push(answer.clone());
-    }
-
-    pub fn add_name_server(&mut self, name_server: &ResourceRecord) {
-        self.name_servers.push(name_server.clone());
-    }
-
-    pub fn add_answers(&mut self, answers: Vec<ResourceRecord>) {
-        for answer in answers {
-            self.answers.push(answer)
-        }
-    }
-
-    pub fn add_name_servers(&mut self, name_servers: Vec<ResourceRecord>) {
-        for name_server in name_servers {
-            self.name_servers.push(name_server)
-        }
-    }
-
-    pub fn add_questions(&mut self, questions: Vec<Question>) {
-        for question in questions {
-            self.questions.push(question)
-        }
-    }
-}
-
-impl fmt::Display for Frame {
+impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "id:{} type:{} ", self.id, self.packet_type)?;
 
@@ -268,7 +209,12 @@ impl fmt::Display for ResourceRecordData {
             ),
             ResourceRecordData::CName(value) => write!(f, "CName: {}", value),
             ResourceRecordData::SOA(value) => write!(f, "SOARecord: {:?}", value),
-            ResourceRecordData::MX(preference, exchange) => write!(f, "MXRecord: preference {:?}, exchange {:?}", preference, exchange)
+            ResourceRecordData::MX(preference, exchange) => write!(
+                f,
+                "MXRecord: preference {:?}, exchange {:?}",
+                preference, exchange
+            ),
+            ResourceRecordData::TXT(value) => write!(f, "TXTRecord: {:?}", value),
         }
     }
 }

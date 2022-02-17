@@ -1,29 +1,14 @@
-use log::info;
-use packets::Frame;
 use server::Server;
 
-mod client;
-mod coding;
-mod connection;
-mod errors;
-mod network_buffer;
-mod packets;
+mod messages;
 mod server;
-
-fn log_frame(frame: &Frame) {
-    info!("{}", frame);
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start the logger
     env_logger::init();
 
-    let mut server = Server::new();
+    let server = Server::new();
 
-    server.add_pre_request_hook(log_frame);
-    server.add_post_request_hook(log_frame);
-
-    server.listen(8080).await?;
-    Ok(())
+    server.listen(8080).await
 }

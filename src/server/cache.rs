@@ -3,7 +3,7 @@ use std::{collections::HashMap, vec};
 use chrono::Utc;
 use tokio::sync::RwLock;
 
-use crate::packets::{
+use crate::messages::packets::{
     Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
