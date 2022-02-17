@@ -88,14 +88,6 @@ impl Handler for BaseHandler {
                             &upstream_answers,
                         )
                         .await;
-
-                    safe_cache
-                        .put_resource_records(
-                            &question.domain,
-                            &question.question_type,
-                            &upstream_name_servers,
-                        )
-                        .await;
                 }
             });
         }

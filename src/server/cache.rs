@@ -7,10 +7,12 @@ use crate::messages::packets::{
     Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
+#[derive(Debug)]
 pub struct HashCache {
     map: RwLock<HashMap<CacheKey, Vec<CacheValue>>>,
 }
 
+#[derive(Debug)]
 struct CacheValue {
     data: ResourceRecordData,
     time_to_live: u32,
@@ -42,12 +44,12 @@ impl HashCache {
         }
     }
 
-    pub async fn get(&self, record_type: &ResourceRecordType, domain: &str) -> Vec<ResourceRecord> {
+    pub async fn get(&self, record_type: ResourceRecordType, domain: &str) -> Vec<ResourceRecord> {
         // Get a read lock
         let map = self.map.read().await;
 
         // Find the value in the cache return none if it doesn't exist
-        let results = map.get(&(domain.to_string(), record_type.clone()));
+        let results = map.get(&(domain.to_string(), record_type));
 
         match results {
             Some(results) => {
@@ -106,9 +108,10 @@ impl HashCache {
 
         for question in questions.iter() {
             let mut found_answer = false;
-            self.get(&question.question_type, &question.domain)
-                .await
-                .iter()
+            let found_records = self.get(question.question_type.clone(), &question.domain)
+                .await;
+                
+            found_records.iter()
                 .for_each(|value| {
                     answers.push(value.clone());
                     found_answer = true
