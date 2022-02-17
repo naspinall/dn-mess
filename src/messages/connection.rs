@@ -26,7 +26,7 @@ impl Connection {
     ) -> ConnectionResult<()> {
         FrameCoder::new().encode_frame(message, &mut self.buf)?;
 
-        let buffer_length = self.buf.len();
+        let buffer_length = self.buf.write_count();
 
         sock.send_to(&self.buf.buf[..buffer_length], to_addr)
             .await?;
@@ -37,7 +37,10 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read_frame(&mut self, sock: &UdpSocket) -> ConnectionResult<(SocketAddr, Message)> {
+    pub async fn read_frame(
+        &mut self,
+        sock: &UdpSocket,
+    ) -> ConnectionResult<(SocketAddr, Message)> {
         let (_len, addr) = sock.recv_from(&mut self.buf.buf).await?;
 
         let message = FrameCoder::new().decode_frame(&mut self.buf)?;

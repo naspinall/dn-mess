@@ -1,12 +1,12 @@
 use packets::{Message, PacketType, Question, ResourceRecord, ResponseCode};
 use std::net::SocketAddr;
 
-pub mod packets;
+pub mod client;
 mod coding;
 pub mod connection;
-pub mod client;
 mod errors;
 mod network_buffer;
+pub mod packets;
 
 #[derive(Clone)]
 pub struct Request {
@@ -87,7 +87,8 @@ impl Request {
         // Clone the current request to preset fields
         let mut message = self.message.clone();
 
-        message.op_code = 1;
+        // Set a response type
+        message.packet_type = PacketType::Response;
 
         Response { message }
     }

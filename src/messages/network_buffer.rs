@@ -183,8 +183,12 @@ impl NetworkBuffer {
         self.write_cursor = 0;
     }
 
-    pub fn len(&self) -> usize {
+    pub fn write_count(&self) -> usize {
         self.write_cursor
+    }
+
+    pub fn read_count(&self) -> usize {
+        self.read_cursor
     }
 }
 
@@ -198,7 +202,7 @@ mod tests {
         buf.put_u8(0xFF).unwrap();
 
         assert_eq!(buf.buf[0], 0xFF);
-        assert_eq!(buf.len(), 1);
+        assert_eq!(buf.write_count(), 1);
     }
 
     #[test]
@@ -208,7 +212,7 @@ mod tests {
 
         assert_eq!(buf.buf[0], 0xFC);
         assert_eq!(buf.buf[1], 0x3F);
-        assert_eq!(buf.len(), 2);
+        assert_eq!(buf.write_count(), 2);
     }
 
     #[test]
@@ -220,7 +224,7 @@ mod tests {
         assert_eq!(buf.buf[1], 0x34);
         assert_eq!(buf.buf[2], 0x56);
         assert_eq!(buf.buf[3], 0x78);
-        assert_eq!(buf.len(), 4);
+        assert_eq!(buf.write_count(), 4);
     }
 
     #[test]

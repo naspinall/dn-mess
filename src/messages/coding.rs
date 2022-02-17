@@ -12,7 +12,7 @@ use super::packets::{
 type CodingResult<T> = Result<T, NetworkBufferError>;
 
 pub struct FrameCoder {
-    encoded_domains: HashMap<String, usize>,
+    encoded_names: HashMap<String, usize>,
     decoded_names: HashMap<usize, String>,
 }
 
@@ -20,24 +20,28 @@ impl FrameCoder {
     pub fn new() -> FrameCoder {
         FrameCoder {
             decoded_names: HashMap::new(),
-            encoded_domains: HashMap::new(),
+            encoded_names: HashMap::new(),
         }
     }
 
-    pub fn set_compressed_name(&mut self, domain: &str, buf: &NetworkBuffer) {
-        // Current index of compression
-        let compressed_index = buf.len();
+    // Adds a name to the name cache, to be used to encode pointers.
+    pub fn set_compressed_name(&mut self, name: &str, buf: &NetworkBuffer) {
+        let compressed_index = buf.write_count();
 
-        // Set into hash map
-        self.encoded_domains
-            .insert(domain.to_string(), compressed_index);
+        self.encoded_names
+            .insert(name.to_string(), compressed_index);
     }
 
+    // Gets a pointer to the given compressed name if exists
     pub fn get_compressed_name(&self, domain: &str) -> Option<&usize> {
-        self.encoded_domains.get(domain)
+        self.encoded_names.get(domain)
     }
 
-    pub fn encode_name_label(&mut self, label: &str, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    /// Encodes the given label into the given buffer. Returns the number of bytes written.
+    ///
+    /// A name is made up of multiple labels, for example www.google.com. has labels www, google, com.
+    /// A label is encoded with a length byte, that number of bytes and a null terminating byte.
+    pub fn encode_label(&mut self, label: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
         // Setting label length
         buf.put_u8(label.len() as u8)?;
 
@@ -46,36 +50,44 @@ impl FrameCoder {
             buf.put_u8(character as u8)?;
         }
 
-        Ok(())
+        // Returning the number of bytes written
+        Ok(label.len() + 1)
     }
 
+    /// Write the compressed offset to the given buffer
     pub fn write_compressed_name(
         &self,
         offset: usize,
         buf: &mut NetworkBuffer,
-    ) -> CodingResult<()> {
+    ) -> CodingResult<usize> {
+        // The compressed offset is indicated with a the first two MSB set to 1
+        // The 6 LSB and the next byte indicate the index of the compressed name
+        // logical OR with 0xC000 to set the first two MSB high.
         let compressed_offset = 0xC000 | offset as u16;
 
-        buf.put_u16(compressed_offset)?;
-
-        Ok(())
+        // Put two byte compressed offset
+        buf.put_u16(compressed_offset)
     }
 
-    pub fn encode_name(&mut self, domain: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
+    /// Encodes the given name into the buffer
+    ///
+    /// The name is encoded as either as labels, or a pointer to another set of labels previously encoded
+    pub fn encode_name(&mut self, name: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
         let starting_index = buf.write_cursor;
 
-        // Check if domain has already been cached
-        if let Some(index) = self.get_compressed_name(domain) {
-            // Write the whole compressed domain
+        // Check if domain has already been encoded, and we can write a pointer rather than the labels
+        if let Some(index) = self.get_compressed_name(name) {
             self.write_compressed_name(*index, buf)?;
 
+            // Once a pointer is written, exit.
             return Ok(buf.write_cursor - starting_index);
         };
 
-        // Set domain into hashmap
-        self.set_compressed_name(domain, buf);
+        // Add name to pointer cache.
+        self.set_compressed_name(name, buf);
 
-        let labels = domain.split('.');
+        // Split the name into labels
+        let labels = name.split('.');
 
         for label in labels {
             // Skip empty strings
@@ -84,24 +96,49 @@ impl FrameCoder {
             }
 
             // Add length plus one for length byte
-            self.encode_name_label(&label.to_string(), buf)?;
+            self.encode_label(&label.to_string(), buf)?;
         }
 
+        // Set the null byte
         buf.put_u8(0x00)?;
 
         // Return length for null byte
         Ok(buf.write_cursor - starting_index)
     }
 
+    /// Encode the given resource record
+
+    /// Resource records have the following structure
+    /// ```
+    /// 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                                               |
+    /// /                                               /
+    /// /                      NAME                     /
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                      TYPE                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     CLASS                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                      TTL                      |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                   RDLENGTH                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+    /// /                     RDATA                     /
+    /// /                                               /
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    ///  ```
     pub fn encode_resource_record(
         &mut self,
         resource_record: &ResourceRecord,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
-        // Encode domain name
+        // Encode name record refers to.
         self.encode_name(&resource_record.domain, buf)?;
 
-        // Encode type
+        // Parse type
         let type_bytes: u16 = match resource_record.record_type {
             ResourceRecordType::ARecord => 0x0001,
             ResourceRecordType::AAAARecord => 0x001C,
@@ -116,7 +153,7 @@ impl FrameCoder {
         // Encode the type
         buf.put_u16(type_bytes)?;
 
-        // Encode class
+        // Encode class, only support internet class of request
         buf.put_u16(1)?;
 
         // Encode time to live
@@ -124,15 +161,19 @@ impl FrameCoder {
 
         // Encode RDdata field
         match &resource_record.data {
+            // A Record encoded a 32 bit integer
             ResourceRecordData::A(record) => {
                 buf.put_u16(4)?;
                 buf.put_u32(*record)?;
                 Ok(())
             }
+            // AAAA record encoded as a 128 bit integer
             ResourceRecordData::AAAA(record) => {
                 buf.put_u16(16)?;
                 buf.put_u128(*record)
             }
+
+            // CNAME record encoded as a standard name
             ResourceRecordData::CName(domain) => {
                 // Where length should be
                 let length_index = buf.write_cursor;
@@ -148,6 +189,8 @@ impl FrameCoder {
 
                 Ok(())
             }
+
+            // SOA record encoded.
             ResourceRecordData::SOA(record) => {
                 let length_index = buf.write_cursor;
                 // Write blank data to where size is
@@ -176,32 +219,74 @@ impl FrameCoder {
         }
     }
 
-    pub fn encode_header(&mut self, message: &Message, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    // Encodes the given header into the given buffer
+    /// ```
+    /// 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                      ID                       |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |QR|   Opcode  |AA|TC|RD|RA|   Z    |   RCODE   |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    QDCOUNT                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    ANCOUNT                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    NSCOUNT                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    ARCOUNT                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// ```
+    pub fn encode_header(
+        &mut self,
+        message: &Message,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<usize> {
         // Encode the packet ID
         buf.put_u16(message.id)?;
 
+        // First byte of the options
         let mut options: u8 = 0x00;
 
+        // Encoding query or response, MSB in options
         options |= match message.packet_type {
             PacketType::Query => 0x00,
             PacketType::Response => 0x80,
         };
 
+        // Encoding OPCODE, bits 2 -> 4
         options |= (message.op_code & 0x0F) << 3;
+
+        // Encode AA, bit 5
         options |= if message.authoritative_answer {
             0x04
         } else {
             0x00
         };
-        options |= if message.truncation { 0x02 } else { 0x00 };
-        options |= if message.recursion_desired { 0x01 } else { 0x00 };
 
+        // Encode TC, bit 6
+        options |= if message.truncation { 0x02 } else { 0x00 };
+
+        // Encode RC, LSB
+        options |= if message.recursion_desired {
+            0x01
+        } else {
+            0x00
+        };
+
+        // Write first half of options
         buf.put_u8(options)?;
 
+        // Shadow options
         options = 0x00;
 
-        options |= if message.recursion_available { 0x80 } else { 0x0 };
+        // Set RA, MSB
+        options |= if message.recursion_available {
+            0x80
+        } else {
+            0x0
+        };
 
+        // Set RCODE, don't set Z should be set to zero.
         options |= match message.response_code {
             ResponseCode::None => 0,
             ResponseCode::FormatError => 1,
@@ -209,8 +294,9 @@ impl FrameCoder {
             ResponseCode::NameError => 3,
             ResponseCode::NotImplemented => 4,
             ResponseCode::Refused => 5,
-        } & 0x0F;
+        } & 0x0F; // Truncate to 4 bits
 
+        // Write second half of options
         buf.put_u8(options)?;
 
         // Encode Question Count
@@ -225,16 +311,36 @@ impl FrameCoder {
 
         buf.put_u16(message.additional_records.len() as u16)?;
 
-        Ok(())
+        // Header has fixed size of 12
+        Ok(12)
     }
 
+    /// Encodes the given question into the given buffer
+    ///
+    ///```
+    /// 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                                               |
+    /// /                     QNAME                     /
+    /// /                                               /
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     QTYPE                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     QCLASS                    |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    ///```
+    ///``` text
+    /// QNAME encoded as a name
+    /// QTYPE encoded a 16 bit integer
+    /// QCLASS encoded as a 16 bit integer
+    ///```
     pub fn encode_question(
         &mut self,
         question: &Question,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
-        self.encode_name(&question.domain, buf)?;
+        let mut write_length = self.encode_name(&question.domain, buf)?;
 
         // Encode type
         let type_bytes: u16 = match question.question_type {
@@ -248,13 +354,50 @@ impl FrameCoder {
         };
 
         // Encode the type
-        buf.put_u16(type_bytes)?;
+        write_length += buf.put_u16(type_bytes)?;
 
-        // Encode class
-        buf.put_u16(1)?;
+        // Encode class, only support IN class questions
+        write_length += buf.put_u16(1)?;
 
         Ok(())
     }
+
+    /// Encode given SOA record into the given buffer
+    ///
+    /// SOA record structure
+    ///```
+    /// 0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     MNAME                     |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     RNAME                     |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    SERIAL                     |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    REFRESH                    |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                     RETRY                     |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    EXPIRE                     |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    /// |                    MINIMUM                    |
+    /// |                                               |
+    /// +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+    ///```
+    ///``` text
+    /// MNAME encoded as a name
+    /// RNAME encoded as a name
+    /// SERIAL encoded as a 32 bit integer
+    /// REFRESH encoded as a 32 bit integer
+    /// RETRY encoded as a 32 bit integer
+    /// EXPIRE encoded as a 32 bit integer
+    /// MINIMUM encoded as a 32 bit integer
+    /// ```
 
     pub fn encode_soa_record(
         &mut self,
@@ -476,7 +619,7 @@ impl FrameCoder {
     }
 
     pub fn encode_frame(&mut self, message: &Message, buf: &mut NetworkBuffer) -> CodingResult<()> {
-        self.encode_header(&message, buf)?;
+        let write_length = self.encode_header(&message, buf)?;
 
         // Encode question
         message
@@ -649,7 +792,10 @@ mod tests {
         assert!(message.truncation);
         assert!(message.recursion_desired);
         assert!(message.recursion_available);
-        assert!(matches!(message.response_code, ResponseCode::NotImplemented));
+        assert!(matches!(
+            message.response_code,
+            ResponseCode::NotImplemented
+        ));
     }
 
     #[test]
