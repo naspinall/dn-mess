@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-use crate::{coding::FrameCoder, network_buffer::NetworkBuffer, packets::Frame};
+use super::{coding::FrameCoder, network_buffer::NetworkBuffer, packets::Message};
 
 type ConnectionResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -21,10 +21,10 @@ impl Connection {
     pub async fn write_frame(
         &mut self,
         sock: &UdpSocket,
-        frame: &Frame,
+        message: &Message,
         to_addr: &SocketAddr,
     ) -> ConnectionResult<()> {
-        FrameCoder::new().encode_frame(frame, &mut self.buf)?;
+        FrameCoder::new().encode_frame(message, &mut self.buf)?;
 
         let buffer_length = self.buf.len();
 
@@ -37,14 +37,14 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read_frame(&mut self, sock: &UdpSocket) -> ConnectionResult<(SocketAddr, Frame)> {
+    pub async fn read_frame(&mut self, sock: &UdpSocket) -> ConnectionResult<(SocketAddr, Message)> {
         let (_len, addr) = sock.recv_from(&mut self.buf.buf).await?;
 
-        let frame = FrameCoder::new().decode_frame(&mut self.buf)?;
+        let message = FrameCoder::new().decode_frame(&mut self.buf)?;
 
         // Reset buffer for reuse
         self.buf.reset();
 
-        Ok((addr, frame))
+        Ok((addr, message))
     }
 }

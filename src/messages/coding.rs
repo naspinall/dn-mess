@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::{usize, vec};
 
-use crate::errors::NetworkBufferError;
-use crate::network_buffer::NetworkBuffer;
-use crate::packets::{
-    Frame, PacketType, Question, QuestionClass, ResourceRecord, ResourceRecordClass,
+use super::errors::NetworkBufferError;
+use super::network_buffer::NetworkBuffer;
+
+use super::packets::{
+    Message, PacketType, Question, QuestionClass, ResourceRecord, ResourceRecordClass,
     ResourceRecordData, ResourceRecordType, ResponseCode, SOARecord,
 };
 
@@ -175,33 +176,33 @@ impl FrameCoder {
         }
     }
 
-    pub fn encode_header(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_header(&mut self, message: &Message, buf: &mut NetworkBuffer) -> CodingResult<()> {
         // Encode the packet ID
-        buf.put_u16(frame.id)?;
+        buf.put_u16(message.id)?;
 
         let mut options: u8 = 0x00;
 
-        options |= match frame.packet_type {
+        options |= match message.packet_type {
             PacketType::Query => 0x00,
             PacketType::Response => 0x80,
         };
 
-        options |= (frame.op_code & 0x0F) << 3;
-        options |= if frame.authoritative_answer {
+        options |= (message.op_code & 0x0F) << 3;
+        options |= if message.authoritative_answer {
             0x04
         } else {
             0x00
         };
-        options |= if frame.truncation { 0x02 } else { 0x00 };
-        options |= if frame.recursion_desired { 0x01 } else { 0x00 };
+        options |= if message.truncation { 0x02 } else { 0x00 };
+        options |= if message.recursion_desired { 0x01 } else { 0x00 };
 
         buf.put_u8(options)?;
 
         options = 0x00;
 
-        options |= if frame.recursion_available { 0x80 } else { 0x0 };
+        options |= if message.recursion_available { 0x80 } else { 0x0 };
 
-        options |= match frame.response_code {
+        options |= match message.response_code {
             ResponseCode::None => 0,
             ResponseCode::FormatError => 1,
             ResponseCode::ServerError => 2,
@@ -213,16 +214,16 @@ impl FrameCoder {
         buf.put_u8(options)?;
 
         // Encode Question Count
-        buf.put_u16(frame.questions.len() as u16)?;
+        buf.put_u16(message.questions.len() as u16)?;
 
         // Encode Answer Count
-        buf.put_u16(frame.answers.len() as u16)?;
+        buf.put_u16(message.answers.len() as u16)?;
 
         // Encode Name Server Count
-        buf.put_u16(frame.name_servers.len() as u16)?;
+        buf.put_u16(message.name_servers.len() as u16)?;
         // Encode Additional Records Count
 
-        buf.put_u16(frame.additional_records.len() as u16)?;
+        buf.put_u16(message.additional_records.len() as u16)?;
 
         Ok(())
     }
@@ -474,28 +475,26 @@ impl FrameCoder {
         Ok(result)
     }
 
-    pub fn encode_frame(&mut self, frame: &Frame, buf: &mut NetworkBuffer) -> CodingResult<()> {
-        self.encode_header(&frame, buf)?;
+    pub fn encode_frame(&mut self, message: &Message, buf: &mut NetworkBuffer) -> CodingResult<()> {
+        self.encode_header(&message, buf)?;
 
         // Encode question
-        for question in frame.questions.iter() {
-            self.encode_question(question, buf)?;
-        }
+        message
+            .questions
+            .iter()
+            .try_for_each(|question| self.encode_question(question, buf))?;
 
-        // Encode answers
-        for answer in frame.answers.iter() {
-            self.encode_resource_record(answer, buf)?;
-        }
-
-        // Encode name servers
-        for name_server in frame.name_servers.iter() {
-            self.encode_resource_record(name_server, buf)?;
-        }
+        // Encode answers and name servers
+        message
+            .answers
+            .iter()
+            .chain(message.name_servers.iter())
+            .try_for_each(|record| self.encode_resource_record(record, buf))?;
 
         Ok(())
     }
 
-    pub fn decode_frame(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Frame> {
+    pub fn decode_frame(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Message> {
         // decode ID field
         let id = buf.get_u16()?;
 
@@ -560,7 +559,7 @@ impl FrameCoder {
             additional_records.push(additional_record);
         }
 
-        Ok(Frame {
+        Ok(Message {
             id,
             packet_type,
             op_code,
@@ -640,17 +639,17 @@ mod tests {
 
         buf._put_bytes(&header_bytes).unwrap();
 
-        let frame = coder.decode_frame(&mut buf).unwrap();
+        let message = coder.decode_frame(&mut buf).unwrap();
 
-        assert_eq!(frame.id, 28853);
-        assert_eq!(frame.op_code, 0x02);
-        assert!(matches!(frame.packet_type, PacketType::Response));
+        assert_eq!(message.id, 28853);
+        assert_eq!(message.op_code, 0x02);
+        assert!(matches!(message.packet_type, PacketType::Response));
 
-        assert!(frame.authoritative_answer);
-        assert!(frame.truncation);
-        assert!(frame.recursion_desired);
-        assert!(frame.recursion_available);
-        assert!(matches!(frame.response_code, ResponseCode::NotImplemented));
+        assert!(message.authoritative_answer);
+        assert!(message.truncation);
+        assert!(message.recursion_desired);
+        assert!(message.recursion_available);
+        assert!(matches!(message.response_code, ResponseCode::NotImplemented));
     }
 
     #[test]
@@ -658,7 +657,7 @@ mod tests {
         let mut coder = FrameCoder::new();
         let mut buf = NetworkBuffer::new();
 
-        let frame = Frame {
+        let message = Message {
             id: 28853,
             op_code: 0x02,
             packet_type: PacketType::Response,
@@ -673,7 +672,7 @@ mod tests {
             name_servers: vec![],
         };
 
-        coder.encode_frame(&frame, &mut buf).unwrap();
+        coder.encode_frame(&message, &mut buf).unwrap();
 
         let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 0, 0, 0, 0, 0, 0, 0];
 
@@ -834,16 +833,16 @@ mod tests {
 
         let mut coder = FrameCoder::new();
 
-        let frame = coder.decode_frame(&mut buf).unwrap();
+        let message = coder.decode_frame(&mut buf).unwrap();
 
-        assert!(frame.answers.len() > 0);
-        assert_eq!(frame.answers[0].domain, ".www.facebook.com");
+        assert!(message.answers.len() > 0);
+        assert_eq!(message.answers[0].domain, ".www.facebook.com");
         assert_eq!(
-            frame.answers[0].record_type,
+            message.answers[0].record_type,
             ResourceRecordType::CNameRecord
         );
         assert_eq!(
-            frame.answers[0].data,
+            message.answers[0].data,
             ResourceRecordData::CName(".star-mini.c10r.facebook.com".to_string()),
         );
     }

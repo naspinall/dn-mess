@@ -1,4 +1,4 @@
-use crate::errors::NetworkBufferError;
+use super::errors::NetworkBufferError;
 
 pub const MAX_MESSAGE_SIZE: usize = 512;
 
