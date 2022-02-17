@@ -11,14 +11,17 @@ use super::packets::{
 
 type CodingResult<T> = Result<T, NetworkBufferError>;
 
-pub struct FrameCoder {
+const MAX_NAME_LENGTH: usize = 255;
+const MAX_LABEL_LENGTH: usize = 63;
+
+pub struct MessageCoder {
     encoded_names: HashMap<String, usize>,
     decoded_names: HashMap<usize, String>,
 }
 
-impl FrameCoder {
-    pub fn new() -> FrameCoder {
-        FrameCoder {
+impl MessageCoder {
+    pub fn new() -> MessageCoder {
+        MessageCoder {
             decoded_names: HashMap::new(),
             encoded_names: HashMap::new(),
         }
@@ -42,6 +45,13 @@ impl FrameCoder {
     /// A name is made up of multiple labels, for example www.google.com. has labels www, google, com.
     /// A label is encoded with a length byte, that number of bytes and a null terminating byte.
     pub fn encode_label(&mut self, label: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
+        // Check label length limits, error if invalid
+        if label.len() > MAX_LABEL_LENGTH {
+            return Err(NetworkBufferError::InvalidLabelLengthError(
+                label.to_string(),
+            ));
+        }
+
         // Setting label length
         buf.put_u8(label.len() as u8)?;
 
@@ -73,6 +83,11 @@ impl FrameCoder {
     ///
     /// The name is encoded as either as labels, or a pointer to another set of labels previously encoded
     pub fn encode_name(&mut self, name: &str, buf: &mut NetworkBuffer) -> CodingResult<usize> {
+        // Check name length limits, error if invalid
+        if name.len() > MAX_NAME_LENGTH {
+            return Err(NetworkBufferError::InvalidNameLengthError(name.to_string()));
+        }
+
         let starting_index = buf.write_cursor;
 
         // Check if domain has already been encoded, and we can write a pointer rather than the labels
@@ -182,7 +197,7 @@ impl FrameCoder {
                 buf.put_u16(0)?;
 
                 // Write record data, add one for null terminating byte
-                let record_data_length = self.encode_name(&domain, buf)?;
+                let record_data_length = self.encode_name(domain, buf)?;
 
                 // Set size value
                 buf.set_u16(length_index, record_data_length as u16)?;
@@ -447,11 +462,7 @@ impl FrameCoder {
         })
     }
 
-    pub fn decode_name_label(
-        &mut self,
-        length: usize,
-        buf: &mut NetworkBuffer,
-    ) -> CodingResult<String> {
+    pub fn decode_label(&mut self, length: usize, buf: &mut NetworkBuffer) -> CodingResult<String> {
         let mut label = String::new();
 
         let mut n = 0;
@@ -504,8 +515,17 @@ impl FrameCoder {
                 break;
             }
 
+            // Check label length limits, error if invalid
+            // Check after pointer check, as a pointer has 2 high MSB, and is larger than
+            // the label limit
+            if label_length > MAX_LABEL_LENGTH {
+                return Err(NetworkBufferError::InvalidLabelLengthError(
+                    "Decoding Label".to_string(),
+                ));
+            }
+
             // Decode current label
-            let label = self.decode_name_label(label_length, buf)?;
+            let label = self.decode_label(label_length, buf)?;
 
             // Add to list of decoded domains
             decoded_names.push(label);
@@ -521,6 +541,11 @@ impl FrameCoder {
         let mut name = decoded_names.join(".");
 
         name.push('.');
+
+        // Check name length limits, error if invalid
+        if name.len() > MAX_NAME_LENGTH {
+            return Err(NetworkBufferError::InvalidNameLengthError(name));
+        }
 
         Ok(name)
     }
@@ -618,7 +643,11 @@ impl FrameCoder {
         Ok(result)
     }
 
-    pub fn encode_frame(&mut self, message: &Message, buf: &mut NetworkBuffer) -> CodingResult<()> {
+    pub fn encode_message(
+        &mut self,
+        message: &Message,
+        buf: &mut NetworkBuffer,
+    ) -> CodingResult<()> {
         let write_length = self.encode_header(&message, buf)?;
 
         // Encode question
@@ -637,7 +666,7 @@ impl FrameCoder {
         Ok(())
     }
 
-    pub fn decode_frame(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Message> {
+    pub fn decode_message(&mut self, buf: &mut NetworkBuffer) -> CodingResult<Message> {
         // decode ID field
         let id = buf.get_u16()?;
 
@@ -728,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_decode_single_domain() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 7] = [0x05, b'h', b'e', b'l', b'l', b'o', 0x00];
@@ -743,7 +772,7 @@ mod tests {
 
     #[test]
     fn test_decode_domain() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 11] = [
@@ -760,14 +789,14 @@ mod tests {
 
     #[test]
     fn test_decode_label() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let domain_bytes: [u8; 5] = [b'h', b'e', b'l', b'l', b'o'];
 
         buf._put_bytes(&domain_bytes).unwrap();
 
-        let domain = coder.decode_name_label(5, &mut buf).unwrap();
+        let domain = coder.decode_label(5, &mut buf).unwrap();
 
         // A . is appended so include here
         assert_eq!(domain, String::from("hello"));
@@ -775,14 +804,14 @@ mod tests {
 
     #[test]
     fn test_decode_header() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let header_bytes: [u8; 12] = [112, 181, 151, 132, 0, 0, 0, 0, 0, 0, 0, 0];
 
         buf._put_bytes(&header_bytes).unwrap();
 
-        let message = coder.decode_frame(&mut buf).unwrap();
+        let message = coder.decode_message(&mut buf).unwrap();
 
         assert_eq!(message.id, 28853);
         assert_eq!(message.op_code, 0x02);
@@ -800,7 +829,7 @@ mod tests {
 
     #[test]
     fn test_encode_frame() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let message = Message {
@@ -818,7 +847,7 @@ mod tests {
             name_servers: vec![],
         };
 
-        coder.encode_frame(&message, &mut buf).unwrap();
+        coder.encode_message(&message, &mut buf).unwrap();
 
         let expected_bytes: [u8; 12] = [112, 181, 151, 132, 0, 0, 0, 0, 0, 0, 0, 0];
 
@@ -827,7 +856,7 @@ mod tests {
 
     #[test]
     fn test_decode_question() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let question_bytes: [u8; 20] = [
@@ -849,7 +878,7 @@ mod tests {
 
     #[test]
     fn test_decode_resource_record() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let resource_record_bytes: [u8; 30] = [
@@ -881,7 +910,7 @@ mod tests {
 
     #[test]
     fn test_decode_resource_record_AAARecord() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let resource_record_bytes: [u8; 42] = [
@@ -915,7 +944,7 @@ mod tests {
 
     #[test]
     fn test_decode_resource_record_CNAME() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let resource_record_bytes = [
@@ -947,7 +976,7 @@ mod tests {
 
     #[test]
     fn test_decode_pointer_domain() {
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
         let pointer_domain_bytes: [u8; 18] = [
@@ -977,9 +1006,9 @@ mod tests {
         ])
         .unwrap();
 
-        let mut coder = FrameCoder::new();
+        let mut coder = MessageCoder::new();
 
-        let message = coder.decode_frame(&mut buf).unwrap();
+        let message = coder.decode_message(&mut buf).unwrap();
 
         assert!(message.answers.len() > 0);
         assert_eq!(message.answers[0].domain, ".www.facebook.com");

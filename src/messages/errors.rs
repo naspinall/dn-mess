@@ -6,6 +6,10 @@ pub enum NetworkBufferError {
     BufferEmptyError,
     InvalidPacket,
     CompressionError,
+    InvalidLabelLengthError(String),
+    InvalidNameLengthError(String),
+    InvalidTimeToLiveError(usize),
+    InvalidMessageLengthError,
 }
 
 impl std::error::Error for NetworkBufferError {}
@@ -17,6 +21,10 @@ impl fmt::Display for NetworkBufferError {
             NetworkBufferError::BufferFullError => write!(f, "Buffer Full"),
             NetworkBufferError::InvalidPacket => write!(f, "Invalid Packet"),
             NetworkBufferError::CompressionError => write!(f, "Compression Error"),
+            NetworkBufferError::InvalidLabelLengthError(value) => write!(f, "Invalid Label Length: {}", value),
+            NetworkBufferError::InvalidNameLengthError (value)=> write!(f, "Invalid Name Length: {}", value),
+            NetworkBufferError::InvalidTimeToLiveError(value) => write!(f, "Invalid TTL Value: {}", value),
+            NetworkBufferError::InvalidMessageLengthError => write!(f, "Invalid Message Length"),
         }
     }
 }

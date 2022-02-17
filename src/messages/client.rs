@@ -13,6 +13,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Dial and connect to a remote address. The client will only read messages from the given remote address.
     pub async fn dial(addr: SocketAddr) -> ClientResult<Client> {
         // Bind our socket
         let sock = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).await?;
@@ -30,11 +31,11 @@ impl Client {
     pub async fn send(&mut self, message: &Message) -> ClientResult<Message> {
         // Write message to downstream
         self.connection
-            .write_frame(&self.sock, message, &self.addr)
+            .write_message(&self.sock, message, &self.addr)
             .await?;
 
         // Ignore address as we have connected.
-        let (_, message) = self.connection.read_frame(&self.sock).await?;
+        let (_, message) = self.connection.read_message(&self.sock).await?;
 
         Ok(message)
     }

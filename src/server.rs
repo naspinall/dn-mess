@@ -134,7 +134,7 @@ impl Server {
             let socket = socket.clone();
 
             // Wait for an incoming message
-            let (addr, message) = Connection::new().read_frame(&socket).await?;
+            let (addr, message) = Connection::new().read_message(&socket).await?;
 
             let scoped_handlers = self.handlers.clone();
 
@@ -160,7 +160,7 @@ impl Server {
 
                 // Write response to socket
                 if let Some(err) = Connection::new()
-                    .write_frame(&socket, response.message(), &addr)
+                    .write_message(&socket, response.message(), &addr)
                     .await
                     .err()
                 {
