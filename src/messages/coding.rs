@@ -231,6 +231,23 @@ impl MessageCoder {
                 // TODO
                 Ok(())
             }
+
+            // CNAME record encoded as a standard name
+            ResourceRecordData::NS(domain) => {
+                // Where length should be
+                let length_index = buf.write_cursor;
+
+                // Write blank data to where size is
+                buf.put_u16(0)?;
+
+                // Write record data, add one for null terminating byte
+                let record_data_length = self.encode_name(domain, buf)?;
+
+                // Set size value
+                buf.set_u16(length_index, record_data_length as u16)?;
+
+                Ok(())
+            }
         }
     }
 
@@ -597,6 +614,7 @@ impl MessageCoder {
             ResourceRecordType::MXRecord => {
                 ResourceRecordData::MX(buf.get_u16()?, self.decode_name(buf)?)
             }
+            ResourceRecordType::NSRecord => ResourceRecordData::NS(self.decode_name(buf)?),
             ResourceRecordType::TXTRecord => {
                 ResourceRecordData::TXT(self.decode_txt_record(buf, data_length.into())?)
             }

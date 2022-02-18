@@ -44,6 +44,7 @@ pub enum ResourceRecordData {
     SOA(SOARecord),
     MX(u16, String),
     TXT(String),
+    NS(String)
 }
 
 impl ResourceRecordData {
@@ -55,6 +56,7 @@ impl ResourceRecordData {
             ResourceRecordData::CName(_) => ResourceRecordType::CNameRecord,
             ResourceRecordData::SOA(_) => ResourceRecordType::SOARecord,
             ResourceRecordData::MX(_, _) => ResourceRecordType::MXRecord,
+            ResourceRecordData::NS(_) => ResourceRecordType::NSRecord,
             ResourceRecordData::TXT(_) => ResourceRecordType::TXTRecord,
         }
     }
@@ -215,6 +217,7 @@ impl fmt::Display for ResourceRecordData {
                 preference, exchange
             ),
             ResourceRecordData::TXT(value) => write!(f, "TXTRecord: {:?}", value),
+            ResourceRecordData::NS(value) => write!(f, "NSRecord: {:?}", value),
         }
     }
 }
