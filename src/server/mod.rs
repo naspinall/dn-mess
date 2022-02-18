@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use log::{error, info};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, sync::Mutex};
 
 pub mod cache;
 
@@ -17,82 +17,78 @@ use self::cache::HashCache;
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
 type Cache = Arc<HashCache>;
 
-pub trait RequestHandler: Handler + Clone + Send + Sync {}
-
 pub struct Server {
-    handlers: Vec<BaseHandler>,
+    handlers: Vec<Arc<BaseHandler>>,
 }
 
-#[derive(Clone)]
 pub struct BaseHandler {
     cache: Cache,
+    resolver: Client,
 }
 
 impl BaseHandler {
-    fn new() -> BaseHandler {
-        BaseHandler {
+    async fn new(resovler_addr: SocketAddr) -> ServerResult<BaseHandler> {
+        // Create client for use by handler
+        let client = Client::dial(resovler_addr).await?;
+
+        Ok(BaseHandler {
             cache: Arc::new(HashCache::new()),
-        }
-    }
-
-    pub async fn recurse_query(
-        &self,
-        request: &Message,
-    ) -> ServerResult<(Vec<ResourceRecord>, Vec<ResourceRecord>)> {
-        let mut client = Client::dial(SocketAddr::from(([8, 8, 8, 8], 53))).await?;
-
-        let response = client.send(request).await?;
-
-        Ok((response.answers, response.name_servers))
+            resolver: client,
+        })
     }
 }
 
 #[async_trait]
 impl Handler for BaseHandler {
     async fn handle(&self, request: &Request, mut response: Response) -> ServerResult<Response> {
-        let recurse_request = request.clone();
+        let question = match request.questions().get(0) {
+            // Get first question
+            Some(question) => question,
 
-        let (cache_answers, remaining_questions) =
-            self.cache.get_intersection(request.questions()).await;
+            // If no questions, just return a blank answer
+            None => return Ok(response),
+        };
 
-        // Add cached answers to the response
-        for answer in cache_answers {
-            response.add_answer(answer)
-        }
+        match self
+            .cache
+            .get(question.question_type.clone(), &question.domain)
+            .await
+        {
+            Some(records) => {
+                // Set answers from cache
+                response.set_answers(records);
 
-        if request.recursion_desired() && !remaining_questions.is_empty() {
-            // Recurse to get answers
-            let (upstream_answers, upstream_name_servers) =
-                self.recurse_query(recurse_request.message()).await?;
-
-            for answer in upstream_answers.iter() {
-                response.add_answer(answer.clone());
+                // Send response
+                return Ok(response);
             }
+            None => {
+                // Check that recursion is required
 
-            for name_server in upstream_name_servers.iter() {
-                response.add_name_server(name_server.clone());
-            }
+                if request.recursion_desired() {
+                    let recurse_response = self
+                        .resolver
+                        .query(&question.domain, question.question_type.clone())
+                        .await?;
 
-            // Get a new reference to the cache to move into new task
-            let safe_cache = self.cache.clone();
+                    let cache_answers = recurse_response.answers.clone();
+                    let write_cache = self.cache.clone();
+                    let domain = question.domain.clone();
 
-            // Spawn a new async task to set the records in the cache
-            tokio::spawn(async move {
-                // Set for all questions, will need to remove support for multiple questions
-                for question in remaining_questions.iter() {
-                    // Add upstream answers to the cache
-                    safe_cache
-                        .put_resource_records(
-                            &question.domain,
-                            &question.question_type,
-                            &upstream_answers,
-                        )
-                        .await;
+                    // Set answers
+                    response.set_answers(recurse_response.answers);
+
+                    tokio::spawn(async move {
+                        write_cache
+                            .put_resource_records(&domain, &cache_answers)
+                            .await;
+                    });
+
+                    return Ok(response);
                 }
-            });
-        }
 
-        Ok(response)
+                return Ok(response);
+            }
+        }
     }
 }
 
@@ -102,9 +98,13 @@ pub trait Handler {
 }
 
 impl Server {
-    pub fn new() -> Server {
+    pub async fn new() -> Server {
         Server {
-            handlers: vec![BaseHandler::new()],
+            handlers: vec![Arc::new(
+                BaseHandler::new(SocketAddr::from(([8, 8, 8, 8], 53)))
+                    .await
+                    .unwrap(),
+            )],
         }
     }
 

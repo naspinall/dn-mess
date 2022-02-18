@@ -44,7 +44,11 @@ impl Response {
         self.message.answers.push(record)
     }
     pub fn add_name_server(&mut self, record: ResourceRecord) {
-        self.message.name_servers.push(record)
+        self.message.authorities.push(record)
+    }
+
+    pub fn set_answers(&mut self, answers: Vec<ResourceRecord>) {
+        self.message.answers = answers
     }
 }
 
@@ -89,6 +93,7 @@ impl Request {
 
         // Set a response type
         message.packet_type = PacketType::Response;
+        message.recursion_available = true;
 
         Response { message }
     }

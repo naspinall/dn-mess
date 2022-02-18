@@ -110,7 +110,7 @@ pub struct Message {
 
     pub questions: Vec<Question>,
     pub answers: Vec<ResourceRecord>,
-    pub name_servers: Vec<ResourceRecord>,
+    pub authorities: Vec<ResourceRecord>,
     pub additional_records: Vec<ResourceRecord>,
 }
 
@@ -129,9 +129,9 @@ impl fmt::Display for Message {
             }
         }
 
-        if !self.name_servers.is_empty() {
-            for name_server in self.name_servers.iter() {
-                write!(f, "name server -> {}", name_server)?;
+        if !self.authorities.is_empty() {
+            for authority in self.authorities.iter() {
+                write!(f, "authority -> {}", authority)?;
             }
         }
         Ok(())

@@ -7,23 +7,31 @@ use crate::messages::packets::{
     Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
+type CacheKey = (String, ResourceRecordType);
+
 #[derive(Debug)]
 pub struct HashCache {
     map: RwLock<HashMap<CacheKey, Vec<CacheValue>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct CacheValue {
     data: ResourceRecordData,
     time_to_live: u32,
     expiration: i64,
 }
 
-type CacheKey = (String, ResourceRecordType);
-
 impl CacheValue {
     pub fn is_expired(&self) -> bool {
         Utc::now().timestamp() > self.expiration
+    }
+
+    pub fn from_resource_record(record: &ResourceRecord) -> CacheValue {
+        CacheValue {
+            data: record.data.clone(),
+            time_to_live: record.time_to_live,
+            expiration: Utc::now().timestamp() + record.time_to_live as i64,
+        }
     }
 
     pub fn to_resource_record(&self, domain: &str) -> ResourceRecord {
@@ -44,7 +52,11 @@ impl HashCache {
         }
     }
 
-    pub async fn get(&self, record_type: ResourceRecordType, domain: &str) -> Vec<ResourceRecord> {
+    pub async fn get(
+        &self,
+        record_type: ResourceRecordType,
+        domain: &str,
+    ) -> Option<Vec<ResourceRecord>> {
         // Get a read lock
         let map = self.map.read().await;
 
@@ -54,7 +66,8 @@ impl HashCache {
         match results {
             Some(results) => {
                 // Filter out all the expired values
-                return results
+
+                let return_results: Vec<ResourceRecord> = results
                     .iter()
                     .filter_map(|value| {
                         if value.is_expired() {
@@ -64,64 +77,51 @@ impl HashCache {
                         Some(value.to_resource_record(domain))
                     })
                     .collect();
+
+                // If empty, just return None
+                if return_results.is_empty() {
+                    return None;
+                }
+
+                return Some(return_results);
             }
 
             // Just return an empty vector
-            None => return vec![],
+            None => return None,
         }
     }
 
-    pub async fn put_resource_records(
-        &self,
-        domain: &str,
-        record_type: &ResourceRecordType,
-        resource_records: &[ResourceRecord],
-    ) {
+    pub async fn put_resource_records(&self, domain: &str, resource_records: &Vec<ResourceRecord>) {
+        // Get write lock
         let mut map = self.map.write().await;
 
-        let cache_key: CacheKey = (domain.to_string(), record_type.clone());
+        // Add all records to the cache
+        resource_records.iter().for_each(|record| {
+            // Make key
+            let cache_key: CacheKey = (domain.to_string(), record.record_type.clone());
+            let cache_value = CacheValue::from_resource_record(record);
 
-        let cache_value = resource_records
-            .iter()
-            .map(|record| {
-                // Get the expiration time
-                let expiration = Utc::now().timestamp() + record.time_to_live as i64;
-
-                CacheValue {
-                    data: record.data.clone(),
-                    time_to_live: record.time_to_live,
-                    expiration,
-                }
-            })
-            .collect();
-
-        map.insert(cache_key, cache_value);
-    }
-
-    pub async fn get_intersection(
-        &self,
-        questions: &[Question],
-    ) -> (Vec<ResourceRecord>, Vec<Question>) {
-        // Return vectors
-        let mut excluded_questions = vec![];
-        let mut answers = vec![];
-
-        for question in questions.iter() {
-            let mut found_answer = false;
-            let found_records = self.get(question.question_type.clone(), &question.domain)
-                .await;
-                
-            found_records.iter()
-                .for_each(|value| {
-                    answers.push(value.clone());
-                    found_answer = true
-                });
-
-            if !found_answer {
-                excluded_questions.push(question.clone())
+            // Check if already in cache
+            if !map.contains_key(&cache_key) {
+                // Insert the value, we are done
+                map.insert(cache_key, vec![cache_value]);
+                return;
             }
-        }
 
-        (answers, excluded_questions)
+            // Add to the list of existing records if not already contained
+            match map.get_mut(&cache_key) {
+                Some(value) => {
+                    // Already cached, ignore it
+                    if value.contains(&cache_value) {
+                        return;
+                    }
+
+                    // Otherwise add to the list of values
+                    value.push(cache_value)
+                }
+                // Do nothing
+                None => return,
+            }
+        })
     }
 }

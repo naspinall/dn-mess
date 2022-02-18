@@ -321,7 +321,7 @@ impl MessageCoder {
         buf.put_u16(message.answers.len() as u16)?;
 
         // Encode Name Server Count
-        buf.put_u16(message.name_servers.len() as u16)?;
+        buf.put_u16(message.authorities.len() as u16)?;
         // Encode Additional Records Count
 
         buf.put_u16(message.additional_records.len() as u16)?;
@@ -660,7 +660,7 @@ impl MessageCoder {
         message
             .answers
             .iter()
-            .chain(message.name_servers.iter())
+            .chain(message.authorities.iter())
             .try_for_each(|record| self.encode_resource_record(record, buf))?;
 
         Ok(())
@@ -721,8 +721,8 @@ impl MessageCoder {
 
         // Encode name server
         for _ in 0..name_server_count {
-            let name_server = self.decode_resource_record(buf)?;
-            name_servers.push(name_server);
+            let authority = self.decode_resource_record(buf)?;
+            name_servers.push(authority);
         }
 
         // Encode additional records
@@ -744,7 +744,7 @@ impl MessageCoder {
 
             questions,
             answers,
-            name_servers,
+            authorities: name_servers,
             additional_records,
         })
     }
@@ -844,7 +844,7 @@ mod tests {
             questions: vec![],
             answers: vec![],
             additional_records: vec![],
-            name_servers: vec![],
+            authorities: vec![],
         };
 
         coder.encode_message(&message, &mut buf).unwrap();
