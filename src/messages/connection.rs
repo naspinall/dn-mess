@@ -24,7 +24,7 @@ impl Connection {
         message: &Message,
         to_addr: &SocketAddr,
     ) -> ConnectionResult<usize> {
-        // Encode the frame, FrameCoder instances should be ephemeral
+        // Encode the message, MessageCoder instances should be ephemeral
         MessageCoder::new().encode_message(message, &mut self.buf)?;
 
         // Only write the length of the buffer

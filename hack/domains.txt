@@ -205,14 +205,12 @@ purevolume.com
 nature.com
 pcworld.com
 de.vu
-miitbeian.gov.cn
 wikispaces.com
 utexas.edu
 ask.com
 scientificamerican.com
 pen.io
 ebay.co.uk
-macromedia.com
 clickbank.net
 seesaa.net
 msu.edu
@@ -482,7 +480,6 @@ reuters.com
 infoseek.co.jp
 aboutads.info
 weibo.com
-miibeian.gov.cn
 wufoo.com
 sitemeter.com
 ted.com

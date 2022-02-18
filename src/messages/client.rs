@@ -91,7 +91,7 @@ impl Client {
     pub async fn send(&self, message: &Message) -> ClientResult<()> {
         let mut buf = NetworkBuffer::new();
 
-        // Encode the frame, FrameCoder instances should be ephemeral
+        // Encode the message, MessageCoder instances should be ephemeral
         MessageCoder::new().encode_message(message, &mut buf)?;
 
         // Only write the length of the buffer

@@ -108,7 +108,7 @@ impl Server {
         }
     }
 
-    fn log_frame(message: &Message) {
+    fn log_message(message: &Message) {
         info!("{}", message);
     }
 
@@ -134,7 +134,7 @@ impl Server {
             tokio::spawn(async move {
                 let request = Request::new(addr, message);
 
-                Server::log_frame(request.message());
+                Server::log_message(request.message());
 
                 let mut response = request.response();
 
@@ -148,7 +148,7 @@ impl Server {
                     }
                 }
 
-                Server::log_frame(response.message());
+                Server::log_message(response.message());
 
                 // Write response to socket
                 if let Some(err) = Connection::new()

@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_frame() {
+    fn test_encode_message() {
         let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
