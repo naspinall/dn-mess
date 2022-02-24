@@ -2,6 +2,7 @@ use server::Server;
 
 mod messages;
 mod server;
+mod structures;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

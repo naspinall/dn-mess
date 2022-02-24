@@ -44,7 +44,7 @@ pub enum ResourceRecordData {
     SOA(SOARecord),
     MX(u16, String),
     TXT(String),
-    NS(String)
+    NS(String),
 }
 
 impl ResourceRecordData {
@@ -116,6 +116,27 @@ pub struct Message {
     pub additional_records: Vec<ResourceRecord>,
 }
 
+impl Message {
+    /// Get an A record from answers first or additional records second
+    pub fn get_A_record(&self) -> Option<&ResourceRecord> {
+        // Find A record in answers if present
+        let record = self
+            .answers
+            .iter()
+            .find(|record| record.record_type.eq(&ResourceRecordType::ARecord));
+
+        // Return if found an A record
+        if record.is_some() {
+            return record;
+        }
+
+        // Check additional records after for an A record
+        self.additional_records
+            .iter()
+            .find(|record| record.record_type.eq(&ResourceRecordType::ARecord))
+    }
+}
+
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "id:{} type:{} ", self.id, self.packet_type)?;
@@ -134,6 +155,12 @@ impl fmt::Display for Message {
         if !self.authorities.is_empty() {
             for authority in self.authorities.iter() {
                 write!(f, "authority -> {}", authority)?;
+            }
+        }
+
+        if !self.authorities.is_empty() {
+            for additional in self.additional_records.iter() {
+                write!(f, "additional -> {}", additional)?;
             }
         }
         Ok(())
