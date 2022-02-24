@@ -59,6 +59,49 @@ impl BaseHandler {
             // Append label to the search domain
             search_domain = label.to_owned() + "." + &search_domain;
 
+            // Check if we have a cached NS record
+            if let Some(ns_records) = self
+                .cache
+                .get(ResourceRecordType::NSRecord, &search_domain)
+                .await
+            {
+                // Get the first record, if none just continue
+                // TODO bad unwrap
+                let ns_record = ns_records.first().unwrap();
+
+                if let Some(a_records) = self
+                    .cache
+                    .get(ResourceRecordType::ARecord, &ns_record.domain)
+                    .await
+                {
+                    let a_record = a_records.first().unwrap();
+
+                    match a_record.data {
+                        // Set the name server address to the new address
+                        crate::messages::packets::ResourceRecordData::A(value) => {
+                            name_server_address.set_ip(IpAddr::V4(Ipv4Addr::from(value)))
+                        }
+                        _ => return Err(Box::new(RecurseError::NoARecordError)),
+                    };
+
+                    let write_cache = self.cache.clone();
+                    let write_domain = search_domain.clone();
+
+                    tokio::spawn(async move {
+                        write_cache
+                            .put_resource_records(&write_domain, &a_records)
+                            .await;
+
+                        write_cache
+                            .put_resource_records(&write_domain, &ns_records)
+                            .await;
+                    });
+
+                    // We have a cached value, continue on
+                    continue;
+                }
+            }
+
             let client = Client::dial(name_server_address).await?;
 
             let response = client
