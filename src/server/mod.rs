@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use log::{debug, error, info};
+use log::{error, info};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
 };
-use tokio::net::UdpSocket;
+use tokio::{join, net::UdpSocket};
 
 pub mod cache;
 pub mod errors;
@@ -27,18 +27,27 @@ pub struct Server {
 
 pub struct BaseHandler {
     cache: Cache,
-    resolver: Client,
 }
 
 impl BaseHandler {
-    async fn new(resovler_addr: SocketAddr) -> ServerResult<BaseHandler> {
-        // Create client for use by handler
-        let client = Client::dial(resovler_addr).await?;
-
+    async fn new() -> ServerResult<BaseHandler> {
         Ok(BaseHandler {
             cache: Arc::new(HashCache::new()),
-            resolver: client,
         })
+    }
+
+    fn cache_records(&self, message: Message) {
+        // Get reference counted cache
+        let write_cache = self.cache.clone();
+
+        // Put all message resource records at once
+        tokio::spawn(async move {
+            join!(
+                write_cache.put_resource_records(&message.answers),
+                write_cache.put_resource_records(&message.authorities),
+                write_cache.put_resource_records(&message.additional_records),
+            )
+        });
     }
 
     async fn recurse_request(&self, name: &str) -> ServerResult<Message> {
@@ -125,24 +134,8 @@ impl BaseHandler {
                 _ => return Err(Box::new(RecurseError::NoARecordError)),
             };
 
-            let write_cache = self.cache.clone();
-            let current_name_server_domain = name_server_domain.clone();
-            let current_search_domain = search_domain.clone();
-
-            info!("Writing {} NS Records to cache", current_search_domain);
-            info!("Writing {} A Records to cache", current_name_server_domain);
-
-            tokio::spawn(async move {
-                write_cache.put_resource_records(&response.answers).await;
-
-                write_cache
-                    .put_resource_records(&response.authorities)
-                    .await;
-
-                write_cache
-                    .put_resource_records(&response.additional_records)
-                    .await
-            });
+            // Cache all values
+            self.cache_records(response);
         }
 
         // Finally get the A record
@@ -179,20 +172,15 @@ impl Handler for BaseHandler {
             }
             None => {
                 // Check that recursion is required
-
                 if request.recursion_desired() {
                     // Recurse the request
                     let recurse_response = self.recurse_request(&question.domain).await?;
 
-                    let cache_answers = recurse_response.answers.clone();
-                    let write_cache = self.cache.clone();
-
                     // Set answers
-                    response.set_answers(recurse_response.answers);
+                    response.set_answers(recurse_response.answers.clone());
 
-                    tokio::spawn(async move {
-                        write_cache.put_resource_records(&cache_answers).await;
-                    });
+                    // Cache response
+                    self.cache_records(recurse_response);
 
                     return Ok(response);
                 }
@@ -211,11 +199,7 @@ pub trait Handler {
 impl Server {
     pub async fn new() -> Server {
         Server {
-            handlers: vec![Arc::new(
-                BaseHandler::new(SocketAddr::from(([8, 8, 8, 8], 53)))
-                    .await
-                    .unwrap(),
-            )],
+            handlers: vec![Arc::new(BaseHandler::new().await.unwrap())],
         }
     }
 
