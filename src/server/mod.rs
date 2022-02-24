@@ -1,18 +1,22 @@
 use async_trait::async_trait;
 use log::{error, info};
-use std::{net::SocketAddr, sync::Arc};
-use tokio::{net::UdpSocket, sync::Mutex};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
+use tokio::net::UdpSocket;
 
 pub mod cache;
+pub mod errors;
 
 use crate::messages::{
     client::Client,
     connection::Connection,
-    packets::{Message, ResourceRecord},
+    packets::{Message, ResourceRecordType},
     Request, Response,
 };
 
-use self::cache::HashCache;
+use self::{cache::HashCache, errors::RecurseError};
 
 type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
 type Cache = Arc<HashCache>;
@@ -35,6 +39,53 @@ impl BaseHandler {
             cache: Arc::new(HashCache::new()),
             resolver: client,
         })
+    }
+
+    async fn recurse_request(&self, name: &str) -> ServerResult<Message> {
+        // Address for the root server
+        let mut name_server_address = SocketAddr::from(([198, 41, 0, 4], 53));
+
+        // Split the labels, reverse as we recurse from the base
+        let labels = name.split('.').rev();
+
+        let mut search_domain = String::from("");
+
+        for label in labels {
+            // Ignore if empty
+            if label.is_empty() {
+                continue;
+            }
+
+            // Append label to the search domain
+            search_domain = label.to_owned() + "." + &search_domain;
+
+            let client = Client::dial(name_server_address).await?;
+
+            let response = client
+                .query(&search_domain, ResourceRecordType::NSRecord)
+                .await?;
+
+            // Get an A record from the response
+            let a_record = response
+                .get_A_record()
+                .ok_or_else(|| RecurseError::EmptyDomainError)?;
+
+            // Get IP address from A record
+            match a_record.data {
+                // Set the name server address to the new address
+                crate::messages::packets::ResourceRecordData::A(value) => {
+                    name_server_address.set_ip(IpAddr::V4(Ipv4Addr::from(value)))
+                }
+                _ => return Err(Box::new(RecurseError::EmptyDomainError)),
+            };
+        }
+
+        // Finally get the A record
+        let client = Client::dial(name_server_address).await?;
+
+        client
+            .query(&search_domain, ResourceRecordType::ARecord)
+            .await
     }
 }
 
@@ -65,10 +116,8 @@ impl Handler for BaseHandler {
                 // Check that recursion is required
 
                 if request.recursion_desired() {
-                    let recurse_response = self
-                        .resolver
-                        .query(&question.domain, question.question_type.clone())
-                        .await?;
+                    // Recurse the request
+                    let recurse_response = self.recurse_request(&question.domain).await?;
 
                     let cache_answers = recurse_response.answers.clone();
                     let write_cache = self.cache.clone();

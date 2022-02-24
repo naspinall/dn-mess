@@ -1,10 +1,10 @@
-use std::{collections::HashMap, process::Child};
+use std::collections::HashMap;
 
-struct Node<T> {
+pub struct Node<T> {
     pub data: T,
 
     // Own ID
-    id: usize,
+    pub id: usize,
 
     // Sibling references
     pub next_sibling: Option<usize>,
@@ -15,13 +15,13 @@ struct Node<T> {
     pub last_child: Option<usize>,
 }
 
-struct Tree<T> {
+pub struct Tree<T> {
     nodes: HashMap<usize, Node<T>>,
     current_index: usize,
     root: Option<usize>,
 }
 
-struct ChildIterator<'tree, T> {
+pub struct ChildIterator<'tree, T> {
     id: usize,
     nodes: &'tree HashMap<usize, Node<T>>,
 }
@@ -48,7 +48,7 @@ impl<'tree, T> Iterator for ChildIterator<'tree, T> {
 }
 
 impl<T> Tree<T> {
-    fn new() -> Tree<T> {
+    pub fn new() -> Tree<T> {
         Tree {
             nodes: HashMap::new(),
             current_index: 0,
@@ -141,6 +141,10 @@ impl<T> Tree<T> {
     pub fn iter_children(&self, id: usize) -> ChildIterator<T> {
         ChildIterator::new(id, &self.nodes)
     }
+
+    pub fn get_root_id(&self) -> Option<usize> {
+        self.root
+    }
 }
 
 mod tests {
@@ -171,8 +175,8 @@ mod tests {
 
         let mut children = vec![];
 
-        // Add 10 children to the root
-        for i in 0..10 {
+        // Add 100 children to the root
+        for i in 0..100 {
             let value = "Hello".to_string();
             let id = tree.add(value);
 
