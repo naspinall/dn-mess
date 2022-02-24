@@ -3,6 +3,8 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
+use log::info;
+
 #[derive(Debug, Clone)]
 pub enum PacketType {
     Query,
@@ -118,12 +120,26 @@ pub struct Message {
 
 impl Message {
     /// Get an A record from answers first or additional records second
-    pub fn get_A_record(&self) -> Option<&ResourceRecord> {
+    pub fn get_record(
+        &self,
+        record_type: &ResourceRecordType,
+        domain: &str,
+    ) -> Option<&ResourceRecord> {
         // Find A record in answers if present
         let record = self
             .answers
             .iter()
-            .find(|record| record.record_type.eq(&ResourceRecordType::ARecord));
+            .find(|record| record.record_type.eq(record_type) && record.domain.eq(domain));
+
+        // Return if found an A record
+        if record.is_some() {
+            return record;
+        }
+
+        let record = self
+            .authorities
+            .iter()
+            .find(|record| record.record_type.eq(record_type) && record.domain.eq(domain));
 
         // Return if found an A record
         if record.is_some() {
@@ -133,7 +149,7 @@ impl Message {
         // Check additional records after for an A record
         self.additional_records
             .iter()
-            .find(|record| record.record_type.eq(&ResourceRecordType::ARecord))
+            .find(|record| record.record_type.eq(record_type) && record.domain.eq(domain))
     }
 }
 

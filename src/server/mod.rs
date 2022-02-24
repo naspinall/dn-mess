@@ -12,7 +12,7 @@ pub mod errors;
 use crate::messages::{
     client::Client,
     connection::Connection,
-    packets::{Message, ResourceRecordType},
+    packets::{Message, ResourceRecordData, ResourceRecordType},
     Request, Response,
 };
 
@@ -65,10 +65,21 @@ impl BaseHandler {
                 .query(&search_domain, ResourceRecordType::NSRecord)
                 .await?;
 
-            // Get an A record from the response
+            // Get NS record for the search domain
+            let ns_record = response
+                .get_record(&ResourceRecordType::NSRecord, &search_domain)
+                .ok_or_else(|| RecurseError::NoNameServerError)?;
+
+            // Get domain for name server
+            let name_server_domain = match &ns_record.data {
+                ResourceRecordData::NS(domain) => domain,
+                _ => return Err(Box::new(RecurseError::NoNameServerError)),
+            };
+
+            // Get an A record for the name server if provided
             let a_record = response
-                .get_A_record()
-                .ok_or_else(|| RecurseError::EmptyDomainError)?;
+                .get_record(&ResourceRecordType::ARecord, &name_server_domain)
+                .ok_or_else(|| RecurseError::NoARecordError)?;
 
             // Get IP address from A record
             match a_record.data {
@@ -76,7 +87,7 @@ impl BaseHandler {
                 crate::messages::packets::ResourceRecordData::A(value) => {
                     name_server_address.set_ip(IpAddr::V4(Ipv4Addr::from(value)))
                 }
-                _ => return Err(Box::new(RecurseError::EmptyDomainError)),
+                _ => return Err(Box::new(RecurseError::NoARecordError)),
             };
         }
 
