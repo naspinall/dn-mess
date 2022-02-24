@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use log::{error, info};
+use log::{debug, error, info};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -69,9 +69,14 @@ impl BaseHandler {
                 // TODO bad unwrap
                 let ns_record = ns_records.first().unwrap();
 
+                let name_server_domain = match &ns_record.data {
+                    ResourceRecordData::NS(domain) => domain,
+                    _ => return Err(Box::new(RecurseError::NoNameServerError)),
+                };
+
                 if let Some(a_records) = self
                     .cache
-                    .get(ResourceRecordType::ARecord, &ns_record.domain)
+                    .get(ResourceRecordType::ARecord, &name_server_domain)
                     .await
                 {
                     let a_record = a_records.first().unwrap();
@@ -83,19 +88,6 @@ impl BaseHandler {
                         }
                         _ => return Err(Box::new(RecurseError::NoARecordError)),
                     };
-
-                    let write_cache = self.cache.clone();
-                    let write_domain = search_domain.clone();
-
-                    tokio::spawn(async move {
-                        write_cache
-                            .put_resource_records(&write_domain, &a_records)
-                            .await;
-
-                        write_cache
-                            .put_resource_records(&write_domain, &ns_records)
-                            .await;
-                    });
 
                     // We have a cached value, continue on
                     continue;
@@ -132,6 +124,25 @@ impl BaseHandler {
                 }
                 _ => return Err(Box::new(RecurseError::NoARecordError)),
             };
+
+            let write_cache = self.cache.clone();
+            let current_name_server_domain = name_server_domain.clone();
+            let current_search_domain = search_domain.clone();
+
+            info!("Writing {} NS Records to cache", current_search_domain);
+            info!("Writing {} A Records to cache", current_name_server_domain);
+
+            tokio::spawn(async move {
+                write_cache.put_resource_records(&response.answers).await;
+
+                write_cache
+                    .put_resource_records(&response.authorities)
+                    .await;
+
+                write_cache
+                    .put_resource_records(&response.additional_records)
+                    .await
+            });
         }
 
         // Finally get the A record
@@ -175,15 +186,12 @@ impl Handler for BaseHandler {
 
                     let cache_answers = recurse_response.answers.clone();
                     let write_cache = self.cache.clone();
-                    let domain = question.domain.clone();
 
                     // Set answers
                     response.set_answers(recurse_response.answers);
 
                     tokio::spawn(async move {
-                        write_cache
-                            .put_resource_records(&domain, &cache_answers)
-                            .await;
+                        write_cache.put_resource_records(&cache_answers).await;
                     });
 
                     return Ok(response);

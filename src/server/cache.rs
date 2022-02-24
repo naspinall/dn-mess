@@ -91,14 +91,14 @@ impl HashCache {
         }
     }
 
-    pub async fn put_resource_records(&self, domain: &str, resource_records: &Vec<ResourceRecord>) {
+    pub async fn put_resource_records(&self, resource_records: &Vec<ResourceRecord>) {
         // Get write lock
         let mut map = self.map.write().await;
 
         // Add all records to the cache
         resource_records.iter().for_each(|record| {
             // Make key
-            let cache_key: CacheKey = (domain.to_string(), record.record_type.clone());
+            let cache_key: CacheKey = (record.domain.clone(), record.record_type.clone());
             let cache_value = CacheValue::from_resource_record(record);
 
             // Check if already in cache
