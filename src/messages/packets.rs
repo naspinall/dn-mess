@@ -3,8 +3,6 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use log::info;
-
 #[derive(Debug, Clone)]
 pub enum PacketType {
     Query,

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use log::{error, info};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -22,18 +21,19 @@ type ServerResult<T> = Result<T, Box<dyn std::error::Error>>;
 type Cache = Arc<HashCache>;
 
 pub struct Server {
-    handlers: Vec<Arc<BaseHandler>>,
+    base_handler: BaseHandler,
 }
 
+#[derive(Debug, Clone)]
 pub struct BaseHandler {
     cache: Cache,
 }
 
 impl BaseHandler {
-    async fn new() -> ServerResult<BaseHandler> {
-        Ok(BaseHandler {
+    fn new() -> BaseHandler {
+        BaseHandler {
             cache: Arc::new(HashCache::new()),
-        })
+        }
     }
 
     fn cache_records(&self, message: Message) {
@@ -145,10 +145,7 @@ impl BaseHandler {
             .query(&search_domain, ResourceRecordType::ARecord)
             .await
     }
-}
 
-#[async_trait]
-impl Handler for BaseHandler {
     async fn handle(&self, request: &Request, mut response: Response) -> ServerResult<Response> {
         let question = match request.questions().get(0) {
             // Get first question
@@ -191,15 +188,10 @@ impl Handler for BaseHandler {
     }
 }
 
-#[async_trait]
-pub trait Handler {
-    async fn handle(&self, request: &Request, mut response: Response) -> ServerResult<Response>;
-}
-
 impl Server {
     pub async fn new() -> Server {
         Server {
-            handlers: vec![Arc::new(BaseHandler::new().await.unwrap())],
+            base_handler: BaseHandler::new(),
         }
     }
 
@@ -223,25 +215,23 @@ impl Server {
             // Wait for an incoming message
             let (addr, message) = Connection::new().read_message(&socket).await?;
 
-            let scoped_handlers = self.handlers.clone();
+            let base_handler = self.base_handler.clone();
 
             // Spawn a new task and move all scoped variables into the task
             tokio::spawn(async move {
-                let request = Request::new(addr, message);
+                let request = Request::new(message);
 
                 Server::log_message(request.message());
 
                 let mut response = request.response();
 
-                for handler in scoped_handlers.iter() {
-                    response = match handler.handle(&request, response).await {
-                        Ok(response) => response,
-                        Err(err) => {
-                            error!("Handler error {:?}", err);
-                            return;
-                        }
+                response = match base_handler.handle(&request, response).await {
+                    Ok(response) => response,
+                    Err(err) => {
+                        error!("Handler error {:?}", err);
+                        return;
                     }
-                }
+                };
 
                 Server::log_message(response.message());
 

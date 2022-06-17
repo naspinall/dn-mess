@@ -11,6 +11,4 @@ tokio = { version = "1", features = ["full"] }
 rand = { version = "*" }
 log = "0.4"
 env_logger = "0.9"
-sqlite ="0.26"
 chrono = "0.4"
-async-trait = "0.1.52"

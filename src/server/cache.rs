@@ -4,7 +4,7 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::messages::packets::{
-    Question, ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
+    ResourceRecord, ResourceRecordClass, ResourceRecordData, ResourceRecordType,
 };
 
 type CacheKey = (String, ResourceRecordType);

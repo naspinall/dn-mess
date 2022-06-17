@@ -8,8 +8,6 @@ pub enum NetworkBufferError {
     CompressionError,
     InvalidLabelLengthError(String),
     InvalidNameLengthError(String),
-    InvalidTimeToLiveError(usize),
-    InvalidMessageLengthError,
 }
 
 impl std::error::Error for NetworkBufferError {}
@@ -27,18 +25,12 @@ impl fmt::Display for NetworkBufferError {
             NetworkBufferError::InvalidNameLengthError(value) => {
                 write!(f, "Invalid Name Length: {}", value)
             }
-            NetworkBufferError::InvalidTimeToLiveError(value) => {
-                write!(f, "Invalid TTL Value: {}", value)
-            }
-            NetworkBufferError::InvalidMessageLengthError => write!(f, "Invalid Message Length"),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum ClientError {
-    RecieveError,
-}
+pub enum ClientError {}
 
 impl std::error::Error for ClientError {}
 

@@ -1,13 +1,9 @@
-use std::collections::HashMap;
 use std::{net::SocketAddr, sync::Arc};
 
 use rand::prelude::StdRng;
 use rand::{Rng, SeedableRng};
 use tokio::{net::UdpSocket, sync::RwLock};
 
-use tokio::sync::mpsc;
-
-use crate::messages::errors::ClientError;
 use crate::messages::packets::{Question, QuestionClass, ResponseCode};
 
 use super::{
@@ -46,8 +42,7 @@ impl Client {
         // Only write the length of the buffer
         let buffer_length = buf.write_count();
 
-        let write_count = self
-            .sock
+        self.sock
             .send_to(&buf.buf[..buffer_length], self.addr)
             .await?;
 
@@ -94,7 +89,7 @@ impl Client {
         self.send(&message, &mut buf).await?;
 
         // Read datagram from socket
-        let (_len, addr) = self.sock.recv_from(&mut buf.buf).await.unwrap();
+        let (_len, _) = self.sock.recv_from(&mut buf.buf).await.unwrap();
 
         // Decode message
         let message = MessageCoder::new().decode_message(&mut buf).unwrap();

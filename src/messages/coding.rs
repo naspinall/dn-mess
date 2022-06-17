@@ -227,7 +227,7 @@ impl MessageCoder {
                 buf.set_u16(length_index, length as u16)
             }
 
-            ResourceRecordData::TXT(value) => {
+            ResourceRecordData::TXT(_) => {
                 // TODO
                 Ok(())
             }
@@ -372,7 +372,7 @@ impl MessageCoder {
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
         // Encode domain name
-        let mut write_length = self.encode_name(&question.domain, buf)?;
+        self.encode_name(&question.domain, buf)?;
 
         // Encode type
         let type_bytes: u16 = match question.question_type {
@@ -386,10 +386,10 @@ impl MessageCoder {
         };
 
         // Encode the type
-        write_length += buf.put_u16(type_bytes)?;
+        buf.put_u16(type_bytes)?;
 
         // Encode class, only support IN class questions
-        write_length += buf.put_u16(1)?;
+        buf.put_u16(1)?;
 
         Ok(())
     }
@@ -666,7 +666,7 @@ impl MessageCoder {
         message: &Message,
         buf: &mut NetworkBuffer,
     ) -> CodingResult<()> {
-        let write_length = self.encode_header(&message, buf)?;
+        self.encode_header(&message, buf)?;
 
         // Encode question
         message
@@ -927,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_resource_record_AAARecord() {
+    fn test_decode_resource_record_aaarecord() {
         let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 
@@ -961,7 +961,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_resource_record_CNAME() {
+    fn test_decode_resource_record_cname() {
         let mut coder = MessageCoder::new();
         let mut buf = NetworkBuffer::new();
 

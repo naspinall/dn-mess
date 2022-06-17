@@ -186,10 +186,6 @@ impl NetworkBuffer {
     pub fn write_count(&self) -> usize {
         self.write_cursor
     }
-
-    pub fn read_count(&self) -> usize {
-        self.read_cursor
-    }
 }
 
 #[cfg(test)]
