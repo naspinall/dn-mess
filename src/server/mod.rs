@@ -74,13 +74,16 @@ impl BaseHandler {
                 .get(ResourceRecordType::NSRecord, &search_domain)
                 .await
             {
-                // Get the first record, if none just continue
-                // TODO bad unwrap
-                let ns_record = ns_records.first().unwrap();
+                // Get the first record, if none break here and continue
+                let ns_record = match ns_records.first() {
+                    Some(record) => record,
+                    None => break,
+                };
 
+                // TODO put this as a response method
                 let name_server_domain = match &ns_record.data {
                     ResourceRecordData::NS(domain) => domain,
-                    _ => return Err(Box::new(RecurseError::NoNameServerError)),
+                    _ => break,
                 };
 
                 if let Some(a_records) = self
@@ -88,14 +91,18 @@ impl BaseHandler {
                     .get(ResourceRecordType::ARecord, &name_server_domain)
                     .await
                 {
-                    let a_record = a_records.first().unwrap();
+                    // Get the first record, if none break here and continue
+                    let a_record = match a_records.first() {
+                        Some(record) => record,
+                        None => break,
+                    };
 
                     match a_record.data {
                         // Set the name server address to the new address
                         crate::messages::packets::ResourceRecordData::A(value) => {
                             name_server_address.set_ip(IpAddr::V4(Ipv4Addr::from(value)))
                         }
-                        _ => return Err(Box::new(RecurseError::NoARecordError)),
+                        _ => break,
                     };
 
                     // We have a cached value, continue on
@@ -121,9 +128,26 @@ impl BaseHandler {
             };
 
             // Get an A record for the name server if provided
-            let a_record = response
-                .get_record(&ResourceRecordType::ARecord, &name_server_domain)
-                .ok_or_else(|| RecurseError::NoARecordError)?;
+            let a_record =
+                match response.get_record(&ResourceRecordType::ARecord, &name_server_domain) {
+                    // If an A record is provided in the response, then use that
+                    Some(record) => record.clone(),
+                    // Perform another query if not
+                    None => {
+                        let response = client
+                            .query(&name_server_domain, ResourceRecordType::ARecord)
+                            .await?;
+
+                        let message = response
+                            .get_record(&ResourceRecordType::ARecord, &name_server_domain)
+                            .ok_or_else(|| RecurseError::NoARecordError)?
+                            .clone();
+
+                        self.cache_records(response);
+
+                        message
+                    }
+                };
 
             // Get IP address from A record
             match a_record.data {
@@ -147,7 +171,7 @@ impl BaseHandler {
     }
 
     async fn handle(&self, request: &Request, mut response: Response) -> ServerResult<Response> {
-        let question = match request.questions().get(0) {
+        let question = match request.questions().first() {
             // Get first question
             Some(question) => question,
 
