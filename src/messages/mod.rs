@@ -1,5 +1,7 @@
 use packets::{Message, PacketType, Question, ResourceRecord};
 
+use self::packets::ResponseCode;
+
 pub mod client;
 mod coding;
 pub mod connection;
@@ -23,6 +25,10 @@ impl Response {
 
     pub fn set_answers(&mut self, answers: Vec<ResourceRecord>) {
         self.message.answers = answers
+    }
+
+    pub fn set_code(&mut self, code: ResponseCode) {
+        self.message.response_code = code;
     }
 }
 

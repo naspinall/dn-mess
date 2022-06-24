@@ -11,7 +11,7 @@ pub mod errors;
 use crate::messages::{
     client::Client,
     connection::Connection,
-    packets::{Message, ResourceRecordData, ResourceRecordType},
+    packets::{Message, ResourceRecordData, ResourceRecordType, ResponseCode},
     Request, Response,
 };
 
@@ -253,7 +253,10 @@ impl Server {
                     Ok(response) => response,
                     Err(err) => {
                         error!("Handler error {:?}", err);
-                        return;
+
+                        let mut response = request.response();
+                        response.set_code(ResponseCode::ServerError);
+                        response
                     }
                 };
 

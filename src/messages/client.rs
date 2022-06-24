@@ -89,10 +89,10 @@ impl Client {
         self.send(&message, &mut buf).await?;
 
         // Read datagram from socket
-        let (_len, _) = self.sock.recv_from(&mut buf.buf).await.unwrap();
+        let (_len, _) = self.sock.recv_from(&mut buf.buf).await?;
 
         // Decode message
-        let message = MessageCoder::new().decode_message(&mut buf).unwrap();
+        let message = MessageCoder::new().decode_message(&mut buf)?;
 
         return Ok(message);
     }

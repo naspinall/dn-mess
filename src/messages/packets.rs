@@ -117,7 +117,7 @@ pub struct Message {
 }
 
 impl Message {
-    /// Get an A record from answers first or additional records second
+    /// Get a record from answers first or additional records second
     pub fn get_record(
         &self,
         record_type: &ResourceRecordType,
